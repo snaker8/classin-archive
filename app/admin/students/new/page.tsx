@@ -1,58 +1,35 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase, getCurrentUser } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ArrowLeft } from 'lucide-react'
+import { createStudent } from '@/app/actions/student'
 
 export default function NewStudentPage() {
   const router = useRouter()
-  const [email, setEmail] = useState('')
-  const [fullName, setFullName] = useState('')
-  const [password, setPassword] = useState('')
+  const formRef = useRef<HTMLFormElement>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  // Simple state for error handling since we might not want full useFormState complexity yet
+  // or we can just handle it with a transition wrapper for better loading state
+
+  const handleSubmit = async (formData: FormData) => {
     setLoading(true)
-    setError('')
-
     try {
-      // Create auth user
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-          },
-        },
-      })
+      const result = await createStudent(null, formData)
 
-      if (authError) throw authError
-
-      if (authData.user) {
-        // Create profile
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert({
-            id: authData.user.id,
-            email,
-            full_name: fullName,
-            role: 'student',
-          })
-
-        if (profileError) throw profileError
-
+      if (result.error) {
+        alert(result.error)
+      } else if (result.success) {
         alert('학생이 성공적으로 추가되었습니다.')
         router.push('/admin/dashboard')
+        router.refresh() // Refresh to show new student
       }
-    } catch (err: any) {
-      setError(err.message || '학생 추가에 실패했습니다.')
+    } catch (err) {
+      alert('오류가 발생했습니다.')
     } finally {
       setLoading(false)
     }
@@ -82,12 +59,11 @@ export default function NewStudentPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form action={handleSubmit} className="space-y-4" ref={formRef}>
             <div className="space-y-2">
               <label className="text-sm font-medium">이름</label>
               <Input
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                name="fullName"
                 placeholder="홍길동"
                 required
               />
@@ -97,8 +73,7 @@ export default function NewStudentPage() {
               <label className="text-sm font-medium">이메일 (로그인 ID)</label>
               <Input
                 type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                name="email"
                 placeholder="student@example.com"
                 required
               />
@@ -111,19 +86,12 @@ export default function NewStudentPage() {
               <label className="text-sm font-medium">비밀번호</label>
               <Input
                 type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                name="password"
                 placeholder="최소 6자 이상"
                 required
                 minLength={6}
               />
             </div>
-
-            {error && (
-              <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-                {error}
-              </div>
-            )}
 
             <div className="flex justify-end space-x-2 pt-4">
               <Button

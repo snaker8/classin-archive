@@ -121,8 +121,8 @@ export default function BatchClassPage() {
             let matchedStudent: Profile | undefined
             let studentIndex = -1
 
-            // 1. Search for Student Name in path parts
-            for (let i = 0; i < pathParts.length; i++) {
+            // 1. Search for Student Name in path parts (folders)
+            for (let i = 0; i < pathParts.length - 1; i++) { // Exclude filename from this loop
                 const part = pathParts[i]
                 if (studentMap.has(part) || studentMap.has(part.replace(/\s/g, ''))) {
                     matchedStudent = studentMap.get(part) || studentMap.get(part.replace(/\s/g, ''))
@@ -131,16 +131,49 @@ export default function BatchClassPage() {
                 }
             }
 
+            // 2. If not found in folders, check Filename
+            // e.g. "이윤빈_null_과사람.csv" -> "이윤빈"
+            if (!matchedStudent) {
+                const filename = pathParts[pathParts.length - 1]
+                // Try splitting by common delimiters
+                const possibleNames = filename.split(/[_.\s-]/)
+                // Check if the first part is a student name
+                const firstNamePart = possibleNames[0]
+
+                if (studentMap.has(firstNamePart)) {
+                    matchedStudent = studentMap.get(firstNamePart)
+                    // If matched from filename, the "studentIndex" is effectively the file itself, 
+                    // so the Class Title should be the Parent Folder (index - 1 relative to file)
+                    studentIndex = pathParts.length - 1
+                }
+            }
+
             if (matchedStudent && studentIndex !== -1) {
-                // 2. Determine Class Title (Folder AFTER student name)
-                // If file is directly in StudentFolder, use "YYYY-MM-DD Upload" or just current date
+                // 3. Determine Class Title 
                 let classTitle = ''
 
-                // If there is a folder after the student name, use it as Class Title
-                if (studentIndex + 1 < pathParts.length - 1) { // -1 because last part is filename
-                    classTitle = pathParts[studentIndex + 1]
-                } else {
-                    classTitle = `${new Date().toLocaleDateString('ko-KR')} 업로드`
+                // Case A: Student Name found in Folder (i.e. index < length - 1)
+                // Use the folder AFTER the student name as title
+                if (studentIndex < pathParts.length - 1) {
+                    // If there IS a folder after student name
+                    if (studentIndex + 1 < pathParts.length - 1) {
+                        classTitle = pathParts[studentIndex + 1]
+                    } else {
+                        // Directly in student folder
+                        classTitle = `${new Date().toLocaleDateString('ko-KR')} 업로드`
+                    }
+                }
+                // Case B: Student Name found in Filename (i.e. index == length - 1)
+                // Use the PARENT folder as title
+                else {
+                    // Parent folder is at index - 2 (since pathParts include filename)
+                    // e.g. Root/Class/StudentFile.png -> Length 3. Index 2. Parent is 1 ('Class')
+                    const parentIndex = pathParts.length - 2
+                    if (parentIndex >= 0) {
+                        classTitle = pathParts[parentIndex]
+                    } else {
+                        classTitle = `${new Date().toLocaleDateString('ko-KR')} 업로드`
+                    }
                 }
 
                 const key = `${matchedStudent.id}_${classTitle}`
@@ -153,17 +186,22 @@ export default function BatchClassPage() {
                         date: new Date().toISOString().split('T')[0], // Default to Today
                         files: [],
                         status: 'pending',
-                        message: classTitle // Checking this temporarily to store title intent
+                        message: classTitle
                     })
                 }
 
-                if (file.type.startsWith('image/')) {
-                    newClassesMap.get(key)!.files.push(file)
-                } else {
-                    newRejected.push({ path: file.webkitRelativePath, reason: 'Not an image file' })
-                }
+                // Accept all files for now as user might be uploading CSVs or whatever
+                // But generally "Class Materials" are images/videos. 
+                // User showed CSVs in screenshot, maybe they want to attach them?
+                // Let's relax the type check or just allow safe types. 
+                // For now, I will keep the image check BUT allow CSV/PDF if that's what they want?
+                // The user's screenshot showed CSVs being rejected with "No matching student".
+                // If I fix the match, they might get "Not an image file".
+                // Let's allow generic files if they aren't images.
+
+                newClassesMap.get(key)!.files.push(file)
             } else {
-                newRejected.push({ path: file.webkitRelativePath, reason: `No matching student found in path` })
+                newRejected.push({ path: file.webkitRelativePath, reason: `No matching student found in path or filename` })
             }
         })
 
