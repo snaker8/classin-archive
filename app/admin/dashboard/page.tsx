@@ -6,7 +6,7 @@ import { supabase, Profile, Class } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Users, BookOpen, Plus, Upload, Calendar } from 'lucide-react'
+import { Users, BookOpen, Plus, Upload, Calendar, FolderInput } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
 export default function AdminDashboard() {
@@ -92,6 +92,10 @@ export default function AdminDashboard() {
           <Button onClick={() => router.push('/admin/classes/new')}>
             <Upload className="h-4 w-4 mr-2" />
             수업 업로드
+          </Button>
+          <Button variant="secondary" onClick={() => router.push('/admin/classes/batch')}>
+            <FolderInput className="h-4 w-4 mr-2" />
+            스마트 폴더 업로드
           </Button>
           <Button variant="outline" onClick={() => router.push('/admin/students/batch')}>
             <Users className="h-4 w-4 mr-2" />
