@@ -36,74 +36,152 @@ export default function BatchClassPage() {
     }, [])
 
     // Smart Folder Parsing Logic
+    // Utility to traverse directories
+    async function getFilesFromEvent(event: any) {
+        const items = event.dataTransfer ? event.dataTransfer.items : event.target.files
+        const files: File[] = []
+
+        // Normalize to array
+        const itemSearchParams = []
+        if (event.dataTransfer) {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i]
+                const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null
+                if (entry) {
+                    itemSearchParams.push(traverseFileTree(entry))
+                }
+            }
+        } else {
+            // Fallback for non-drag input (unlikely to be recursive properly without webkitdirectory)
+            for (let i = 0; i < items.length; i++) {
+                files.push(items[i])
+            }
+            return files
+        }
+
+        await Promise.all(itemSearchParams)
+
+        async function traverseFileTree(item: any, path = '') {
+            if (item.isFile) {
+                return new Promise<void>((resolve) => {
+                    item.file((file: any) => {
+                        // Manually define webkitRelativePath since it might be missing in some cases
+                        // or we want to construct full path from the root drop
+                        Object.defineProperty(file, 'webkitRelativePath', {
+                            value: path + file.name
+                        });
+                        files.push(file)
+                        resolve()
+                    })
+                })
+            } else if (item.isDirectory) {
+                const dirReader = item.createReader()
+                let entries: any[] = []
+
+                const readEntries = async () => {
+                    const result = await new Promise<any[]>((resolve, reject) => {
+                        dirReader.readEntries(resolve, reject)
+                    })
+
+                    if (result.length > 0) {
+                        entries = entries.concat(result)
+                        await readEntries() // Continue reading (Chrome limit 100)
+                    }
+                }
+
+                await readEntries()
+
+                const promises = entries.map((entry) => traverseFileTree(entry, path + item.name + "/"))
+                await Promise.all(promises)
+            }
+        }
+
+        return files
+    }
+
+
+    // Smart Folder Parsing Logic
     const onDrop = useCallback((acceptedFiles: File[]) => {
         const newClassesMap = new Map<string, ParsedClass>()
+        const newRejected: { path: string; reason: string }[] = []
+
+        // Create a mapping of simplified names to student objects for matching
+        // e.g. "Hong Gil Dong" -> "honggildong"
+        const studentMap = new Map<string, Profile>()
+        students.forEach(s => {
+            if (s.full_name) {
+                studentMap.set(s.full_name, s)
+                studentMap.set(s.full_name.replace(/\s/g, ''), s)
+            }
+        })
 
         acceptedFiles.forEach(file => {
-            // Expected path: StudentName/Date/File or StudentName/Date_Desc/File
-            // webkitRelativePath example: "HongGilDong/2024-05-01/image.png"
             const pathParts = file.webkitRelativePath.split('/')
 
-            // We need at least Student and Date folders (depth >= 3 including file)
-            // Or maybe just Student/Date_File? 
-            // Let's assume standard structure: Root/Student/Date/File
-            // So pathParts[0] might be Root, pathParts[1] Student... 
-            // Actually standard drag folder often gives "FolderName/Student/Date/File"
+            let matchedStudent: Profile | undefined
+            let studentIndex = -1
 
-            // Let's search for the date-like part and assume the part BEFORE it is Student
-
-            let dateIndex = -1
-            // Regex for date roughly YYYY-MM-DD
-            const dateRegex = /\b\d{4}-\d{2}-\d{2}\b/
-
+            // 1. Search for Student Name in path parts
             for (let i = 0; i < pathParts.length; i++) {
-                if (dateRegex.test(pathParts[i])) {
-                    dateIndex = i
+                const part = pathParts[i]
+                if (studentMap.has(part) || studentMap.has(part.replace(/\s/g, ''))) {
+                    matchedStudent = studentMap.get(part) || studentMap.get(part.replace(/\s/g, ''))
+                    studentIndex = i
                     break
                 }
             }
 
-            if (dateIndex > 0) {
-                const studentName = pathParts[dateIndex - 1] // Folder right before date
-                const dateStr = pathParts[dateIndex].match(dateRegex)?.[0] || ''
+            if (matchedStudent && studentIndex !== -1) {
+                // 2. Determine Class Title (Folder AFTER student name)
+                // If file is directly in StudentFolder, use "YYYY-MM-DD Upload" or just current date
+                let classTitle = ''
 
-                if (studentName && dateStr) {
-                    const key = `${studentName}_${dateStr}`
-
-                    if (!newClassesMap.has(key)) {
-                        newClassesMap.set(key, {
-                            id: key,
-                            studentName,
-                            date: dateStr,
-                            files: [],
-                            status: 'pending'
-                        })
-                    }
-
-                    // Filter only images (or videos if we support them later as files)
-                    if (file.type.startsWith('image/')) {
-                        newClassesMap.get(key)!.files.push(file)
-                    }
+                // If there is a folder after the student name, use it as Class Title
+                if (studentIndex + 1 < pathParts.length - 1) { // -1 because last part is filename
+                    classTitle = pathParts[studentIndex + 1]
+                } else {
+                    classTitle = `${new Date().toLocaleDateString('ko-KR')} 업로드`
                 }
+
+                const key = `${matchedStudent.id}_${classTitle}`
+
+                if (!newClassesMap.has(key)) {
+                    newClassesMap.set(key, {
+                        id: key,
+                        studentName: matchedStudent.full_name,
+                        studentId: matchedStudent.id,
+                        date: new Date().toISOString().split('T')[0], // Default to Today
+                        files: [],
+                        status: 'pending',
+                        message: classTitle // Checking this temporarily to store title intent
+                    })
+                }
+
+                if (file.type.startsWith('image/')) {
+                    newClassesMap.get(key)!.files.push(file)
+                } else {
+                    newRejected.push({ path: file.webkitRelativePath, reason: 'Not an image file' })
+                }
+            } else {
+                newRejected.push({ path: file.webkitRelativePath, reason: `No matching student found in path` })
             }
         })
 
-        // Convert map to array and try to match student IDs
         const parsedList = Array.from(newClassesMap.values()).map(cls => {
-            const matchedStudent = students.find(s =>
-                s.full_name === cls.studentName || s.full_name.replace(/\s/g, '') === cls.studentName.replace(/\s/g, '')
-            )
+            // We already matched studentId
             return {
                 ...cls,
-                studentId: matchedStudent?.id
+                // If message was used for title, let's keep it or logic handles it in upload
             }
         })
 
         setClasses(prev => [...prev, ...parsedList])
+        setRejectedFiles(prev => [...prev, ...newRejected])
     }, [students])
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
+        getFilesFromEvent: (event) => getFilesFromEvent(event).then(f => f), // Use our custom recursor
         noClick: false,
         noKeyboard: true
     })
@@ -127,12 +205,17 @@ export default function BatchClassPage() {
                 if (!user.data.user) throw new Error("Not authenticated")
 
                 // 1. Create Class
+                // Use cls.message (extracted folder name) as title if available, otherwise default
+                const title = cls.message && cls.message !== ''
+                    ? cls.message
+                    : `${new Date(cls.date).toLocaleDateString('ko-KR')} 수업`
+
                 const { data: classData, error: classError } = await supabase
                     .from('classes')
                     .insert({
                         student_id: cls.studentId,
-                        title: `${new Date(cls.date).toLocaleDateString('ko-KR')} 수업`,
-                        class_date: cls.date,
+                        title: title,
+                        class_date: cls.date, // Default Today from parsing
                         created_by: user.data.user.id
                     })
                     .select()
@@ -183,8 +266,14 @@ export default function BatchClassPage() {
 
     const validClassesCount = classes.filter(c => c.studentId && c.files.length > 0 && c.status === 'pending').length
 
+    const [rejectedFiles, setRejectedFiles] = useState<{ path: string; reason: string }[]>([])
+
+    // ... (inside return, before Drop Zone or after it)
+
+    // Add debug UI after Drop Zone
     return (
         <div className="max-w-6xl mx-auto space-y-6">
+            {/* ... (Header and Upload Button SAME AS BEFORE) ... */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
                     <Button variant="ghost" onClick={() => router.push('/admin/dashboard')}>
@@ -199,6 +288,7 @@ export default function BatchClassPage() {
                     </div>
                 </div>
                 <div className="flex items-center space-x-2">
+                    {/* ... (Upload Button Logic SAME) ... */}
                     {loading && (
                         <div className="text-sm text-muted-foreground mr-4">
                             진행률: {uploadProgress.current} / {uploadProgress.total}
@@ -230,8 +320,9 @@ export default function BatchClassPage() {
                 <div>
                     <strong>폴더 구조 안내:</strong>
                     <p className="mt-1">
-                        <code>[아무폴더] / [학생이름] / [YYYY-MM-DD] / 이미지파일들...</code><br />
-                        예: <code>내PC / 홍길동 / 2024-01-15 / 수학필기.jpg</code>
+                        <code>[아무폴더] / [학생이름] / [수업명(선택)] / 이미지파일들...</code><br />
+                        예: <code>내PC / 홍길동 / 1단원 / 필기.jpg</code> → '1단원' 수업 생성<br />
+                        예: <code>내PC / 홍길동 / 필기.jpg</code> → '2024.01.17 업로드' 수업 생성
                     </p>
                 </div>
             </div>
@@ -250,13 +341,30 @@ export default function BatchClassPage() {
                 </div>
             </Card>
 
+            {/* Ignored Files Debug Info */}
+            {rejectedFiles.length > 0 && (
+                <div className="bg-gray-100 rounded-lg p-4 text-xs font-mono max-h-40 overflow-y-auto">
+                    <h4 className="font-bold text-gray-700 mb-2">무시된 파일들 ({rejectedFiles.length}개) - 디버깅용</h4>
+                    {rejectedFiles.map((f, i) => (
+                        <div key={i} className="flex justify-between border-b border-gray-200 py-1">
+                            <span className="truncate w-2/3" title={f.path}>{f.path}</span>
+                            <span className="text-red-500 w-1/3 text-right">{f.reason}</span>
+                        </div>
+                    ))}
+                    <Button variant="link" size="sm" onClick={() => setRejectedFiles([])} className="mt-2 h-auto p-0 text-gray-500">
+                        목록 지우기
+                    </Button>
+                </div>
+            )}
+
+
             {/* Parsed Results */}
             {classes.length > 0 && (
                 <div className="grid grid-cols-1 gap-4">
                     {classes.map((cls) => (
                         <Card key={cls.id} className={`${cls.status === 'success' ? 'bg-green-50 border-green-200' :
-                                cls.status === 'error' ? 'bg-red-50 border-red-200' :
-                                    !cls.studentId ? 'bg-yellow-50 border-yellow-200' : 'bg-white'
+                            cls.status === 'error' ? 'bg-red-50 border-red-200' :
+                                !cls.studentId ? 'bg-yellow-50 border-yellow-200' : 'bg-white'
                             }`}>
                             <CardContent className="p-4 flex items-center justify-between">
                                 <div className="flex items-center space-x-6">
