@@ -5,7 +5,7 @@
 -- 1. 사용자 프로필 테이블 (profiles)
 -- Supabase Auth와 연동되는 사용자 추가 정보
 CREATE TABLE profiles (
-  id UUID REFERENCES auth.users(id) PRIMARY KEY,
+  id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   full_name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('student', 'admin')),

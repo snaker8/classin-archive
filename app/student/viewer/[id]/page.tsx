@@ -24,7 +24,7 @@ import { formatDate } from '@/lib/utils'
 
 // Dynamic import for HTMLFlipBook to avoid SSR issues
 const HTMLFlipBook = dynamic(
-  () => import('react-pageflip').then((mod) => mod.HTMLFlipBook as any),
+  () => import('react-pageflip').then((mod) => mod.default as any),
   {
     ssr: false,
     loading: () => (
@@ -36,7 +36,7 @@ const HTMLFlipBook = dynamic(
       </div>
     ),
   }
-)
+) as any
 
 // Page Component for FlipBook
 const Page = ({ imageUrl, pageNumber }: { imageUrl: string; pageNumber: number }) => {
@@ -53,7 +53,7 @@ const Page = ({ imageUrl, pageNumber }: { imageUrl: string; pageNumber: number }
           </div>
         </div>
       )}
-      
+
       {imageError && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
           <div className="text-center text-gray-500">
@@ -63,7 +63,7 @@ const Page = ({ imageUrl, pageNumber }: { imageUrl: string; pageNumber: number }
           </div>
         </div>
       )}
-      
+
       <TransformWrapper
         initialScale={1}
         minScale={0.5}
@@ -86,7 +86,7 @@ const Page = ({ imageUrl, pageNumber }: { imageUrl: string; pageNumber: number }
                 style={{ display: imageLoaded && !imageError ? 'block' : 'none' }}
               />
             </TransformComponent>
-            
+
             {/* Zoom Controls */}
             {imageLoaded && !imageError && (
               <div className="absolute bottom-4 right-4 flex flex-col space-y-2 z-10">
@@ -116,7 +116,7 @@ const Page = ({ imageUrl, pageNumber }: { imageUrl: string; pageNumber: number }
           </>
         )}
       </TransformWrapper>
-      
+
       {/* Page Number */}
       <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-3 py-1 rounded-full text-sm">
         {pageNumber}
@@ -289,7 +289,7 @@ export default function ViewerPage() {
               <p className="text-xs sm:text-sm text-gray-300">{formatDate(classInfo.class_date)}</p>
             </div>
           </div>
-          
+
           <div className="flex items-center space-x-2">
             {videos.length > 0 && (
               <Button
@@ -340,8 +340,8 @@ export default function ViewerPage() {
               maxShadowOpacity={0.5}
               mobileScrollSupport={true}
               onFlip={onFlip}
-              onChangeOrientation={() => {}}
-              onChangeState={() => {}}
+              onChangeOrientation={() => { }}
+              onChangeState={() => { }}
             >
               {images.map((image, index) => (
                 <div key={image.id} className="page">
@@ -384,7 +384,7 @@ export default function ViewerPage() {
             <div className="text-sm font-medium">
               페이지 {currentPage + 1} / {images.length}
             </div>
-            
+
             {/* Mobile Navigation */}
             {isMobile && (
               <div className="flex space-x-2">
@@ -406,7 +406,7 @@ export default function ViewerPage() {
                 </Button>
               </div>
             )}
-            
+
             <div className="text-xs text-gray-400 hidden sm:block">
               {isMobile ? '좌우로 스와이프' : '화살표 키로 이동'} • 더블클릭으로 확대
             </div>
@@ -418,11 +418,10 @@ export default function ViewerPage() {
               <button
                 key={image.id}
                 onClick={() => goToPage(index)}
-                className={`relative flex-shrink-0 transition-all ${
-                  currentPage === index
-                    ? 'ring-2 ring-primary scale-110'
-                    : 'opacity-60 hover:opacity-100'
-                }`}
+                className={`relative flex-shrink-0 transition-all ${currentPage === index
+                  ? 'ring-2 ring-primary scale-110'
+                  : 'opacity-60 hover:opacity-100'
+                  }`}
               >
                 <img
                   src={image.content_url}
