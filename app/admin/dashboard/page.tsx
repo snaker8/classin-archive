@@ -93,6 +93,10 @@ export default function AdminDashboard() {
             <Upload className="h-4 w-4 mr-2" />
             수업 업로드
           </Button>
+          <Button variant="outline" onClick={() => router.push('/admin/students/batch')}>
+            <Users className="h-4 w-4 mr-2" />
+            일괄 등록
+          </Button>
         </div>
       </div>
 

@@ -347,16 +347,14 @@ export default function NewClassPage() {
                   setSelectedStudent(student)
                   setValue('studentId', student.id)
                 }}
-                className={`w-full text-left p-3 rounded-lg transition-colors ${
-                  selectedStudent?.id === student.id
+                className={`w-full text-left p-3 rounded-lg transition-colors ${selectedStudent?.id === student.id
                     ? 'bg-primary text-primary-foreground'
                     : 'hover:bg-gray-100'
-                }`}
+                  }`}
               >
                 <div className="font-medium">{student.full_name}</div>
-                <div className={`text-xs ${
-                  selectedStudent?.id === student.id ? 'text-primary-foreground/80' : 'text-muted-foreground'
-                }`}>
+                <div className={`text-xs ${selectedStudent?.id === student.id ? 'text-primary-foreground/80' : 'text-muted-foreground'
+                  }`}>
                   {student.email}
                 </div>
               </button>
@@ -453,11 +451,10 @@ export default function NewClassPage() {
               {/* Dropzone */}
               <div
                 {...getRootProps()}
-                className={`border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-colors ${
-                  isDragActive
+                className={`border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-colors ${isDragActive
                     ? 'border-primary bg-primary/5'
                     : 'border-gray-300 hover:border-primary'
-                }`}
+                  }`}
               >
                 <input {...getInputProps()} />
                 <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
