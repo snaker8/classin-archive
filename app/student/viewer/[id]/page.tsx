@@ -149,30 +149,17 @@ export default function ViewerPage() {
 
   const loadClassData = async () => {
     try {
-      const user = await getCurrentUser()
-      if (!user) return
+      const { getClass } = await import('@/app/actions/class')
+      const { classInfo, materials, error } = await getClass(classId)
 
-      const { data: classData, error: classError } = await supabase
-        .from('classes')
-        .select('*')
-        .eq('id', classId)
-        .eq('student_id', user.id)
-        .single()
+      if (error || !classInfo) throw new Error(error || 'Class not found')
 
-      if (classError) throw classError
-      setClassInfo(classData)
-
-      const { data: materialsData, error: materialsError } = await supabase
-        .from('materials')
-        .select('*')
-        .eq('class_id', classId)
-        .order('order_index', { ascending: true })
-
-      if (materialsError) throw materialsError
-      setMaterials(materialsData || [])
+      setClassInfo(classInfo)
+      setMaterials(materials || [])
     } catch (error) {
       console.error('Error loading class data:', error)
-      router.push('/student/dashboard')
+      // Optional: don't redirect immediately to allow debugging
+      // router.push('/student/dashboard') 
     } finally {
       setLoading(false)
     }

@@ -185,7 +185,7 @@ export default function AdminDashboard() {
                 <div
                   key={cls.id}
                   className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 cursor-pointer"
-                  onClick={() => router.push(`/admin/classes/${cls.id}`)}
+                  onClick={() => router.push(`/student/viewer/${cls.id}`)}
                 >
                   <div className="flex-1">
                     <div className="font-medium">{cls.title}</div>
