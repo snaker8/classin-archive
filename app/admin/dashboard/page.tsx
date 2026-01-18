@@ -170,9 +170,14 @@ export default function AdminDashboard() {
 
       {/* Recent Classes */}
       <Card>
-        <CardHeader>
-          <CardTitle>최근 업로드된 수업</CardTitle>
-          <CardDescription>가장 최근에 추가된 수업 목록</CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>최근 업로드된 수업</CardTitle>
+            <CardDescription>가장 최근에 추가된 수업 목록</CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => router.push('/admin/history')}>
+            전체 보기
+          </Button>
         </CardHeader>
         <CardContent>
           {recentClasses.length === 0 ? (
@@ -185,7 +190,7 @@ export default function AdminDashboard() {
                 <div
                   key={cls.id}
                   className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 cursor-pointer"
-                  onClick={() => router.push(`/student/viewer/${cls.id}`)}
+                  onClick={() => router.push(`/viewer/${cls.id}`)}
                 >
                   <div className="flex-1">
                     <div className="font-medium">{cls.title}</div>

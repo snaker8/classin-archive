@@ -20,7 +20,7 @@ export default function StudentLayout({
     const checkAuth = async () => {
       try {
         const profile = await getCurrentProfile()
-        
+
         if (!profile) {
           router.push('/login')
           return
@@ -32,9 +32,10 @@ export default function StudentLayout({
         }
 
         setUserName(profile.full_name)
-      } catch (error) {
+      } catch (error: any) {
         console.error('Auth error:', error)
-        router.push('/login')
+        // router.push('/login') // Disable redirect for debugging
+        alert(`Auth Error: ${error.message || 'Unknown'}`) // Temporary alert
       } finally {
         setLoading(false)
       }
@@ -44,9 +45,10 @@ export default function StudentLayout({
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
-        router.push('/login')
-      }
+      // if (event === 'SIGNED_OUT') {
+      //   router.push('/login')
+      // }
+      console.log('Auth check:', event)
     })
 
     return () => {
@@ -97,7 +99,7 @@ export default function StudentLayout({
       <main className="container mx-auto px-4 py-6">
         {children}
       </main>
-      
+
       <Toaster />
     </div>
   )

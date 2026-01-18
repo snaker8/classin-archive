@@ -4,7 +4,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { useMediaQuery } from 'react-responsive'
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch'
 import { Class, Material } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -185,10 +184,23 @@ export default function ViewerPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const flipBookRef = useRef<any>(null)
 
-  // Responsive detection
-  const isMobile = useMediaQuery({ maxWidth: 768 })
-  const isTablet = useMediaQuery({ minWidth: 769, maxWidth: 1024 })
-  const isDesktop = useMediaQuery({ minWidth: 1025 })
+  // SSR-safe responsive detection
+  const [isMobile, setIsMobile] = useState(false)
+  const [isTablet, setIsTablet] = useState(false)
+  const [isDesktop, setIsDesktop] = useState(true) // Default to desktop for SSR
+
+  useEffect(() => {
+    const checkScreenSize = () => {
+      const width = window.innerWidth
+      setIsMobile(width <= 768)
+      setIsTablet(width > 768 && width <= 1024)
+      setIsDesktop(width > 1024)
+    }
+
+    checkScreenSize()
+    window.addEventListener('resize', checkScreenSize)
+    return () => window.removeEventListener('resize', checkScreenSize)
+  }, [])
 
   useEffect(() => {
     loadClassData()
@@ -334,6 +346,7 @@ export default function ViewerPage() {
   return (
     <div className="fixed inset-0 bg-gradient-to-br from-gray-900 to-gray-800 flex flex-col">
       {/* Header */}
+
       <header className="bg-gray-800/95 backdrop-blur-sm text-white px-4 py-3 border-b border-gray-700 z-50">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-4">

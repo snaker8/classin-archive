@@ -101,10 +101,10 @@ export default function StudentDashboard() {
         const materials = materialsByClass[cls.id] || []
         const images = materials.filter(m => m.type === 'blackboard_image')
         const videos = materials.filter(m => m.type === 'video_link')
-        
+
         // Get first image as thumbnail
         const thumbnail = images[0]?.content_url || null
-        
+
         // Check if new (within 3 days)
         const daysDiff = differenceInDays(new Date(), new Date(cls.created_at))
         const isNew = daysDiff <= 3
@@ -233,7 +233,7 @@ export default function StudentDashboard() {
               {calendarOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </Button>
           </div>
-          
+
           <div className={`${calendarOpen ? 'block' : 'hidden'} lg:block`}>
             <CardContent className="pt-0">
               <Calendar
@@ -246,7 +246,7 @@ export default function StudentDashboard() {
                 className="rounded-md border-0"
                 locale={ko}
               />
-              
+
               {selectedDate && (
                 <Button
                   variant="outline"
@@ -257,7 +257,7 @@ export default function StudentDashboard() {
                   날짜 필터 해제
                 </Button>
               )}
-              
+
               <div className="mt-4 p-3 bg-blue-50 rounded-lg">
                 <p className="text-xs text-blue-700 flex items-center">
                   <span className="inline-block w-2 h-2 bg-primary rounded-full mr-2" />
@@ -371,7 +371,7 @@ export default function StudentDashboard() {
             <Card
               key={cls.id}
               className="overflow-hidden hover:shadow-xl transition-all duration-300 cursor-pointer group"
-              onClick={() => router.push(`/student/viewer/${cls.id}`)}
+              onClick={() => router.push(`/viewer/${cls.id}`)}
             >
               {/* Thumbnail */}
               <div className="relative aspect-[4/3] bg-gradient-to-br from-gray-100 to-gray-200 overflow-hidden">
