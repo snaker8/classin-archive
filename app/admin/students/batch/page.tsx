@@ -148,50 +148,99 @@ export default function BatchStudentPage() {
         if (files.length === 0) return
 
         setLoading(true)
+
+        // 1. Fetch existing students to check for duplicates
+        let existingNames = new Set<string>();
+        try {
+            const { data: existingStudents } = await supabase
+                .from('profiles')
+                .select('full_name')
+                .eq('role', 'student')
+
+            if (existingStudents) {
+                existingStudents.forEach(s => existingNames.add(s.full_name))
+            }
+        } catch (err) {
+            console.error("Failed to fetch existing students", err)
+        }
+
         const newFiles = [...files]
 
         for (let i = 0; i < newFiles.length; i++) {
             if (newFiles[i].status === 'success') continue;
 
-            // Add delay to prevent Supabase Rate Limit (auth.signUp is often rate limited)
-            if (i > 0) await delay(1000) // 1 second delay between requests
-
             const studentName = newFiles[i].name.trim()
-            const uniqueId = Math.random().toString(36).substring(2, 8)
-            const email = `student_${Date.now()}_${uniqueId}@classin.com`
-            const password = '123456'
 
-            try {
-                const { data: authData, error: authError } = await supabase.auth.signUp({
-                    email,
-                    password,
-                    options: {
-                        data: {
-                            full_name: studentName,
-                            grade: newFiles[i].grade
-                        }
-                    },
-                })
+            // 2. Client-side Duplicate Check
+            if (existingNames.has(studentName)) {
+                newFiles[i].status = 'error' // Or specific status like 'skipped'
+                newFiles[i].message = '이미 등록된 학생입니다.'
+                setFiles([...newFiles]) // Update UI immediately
+                continue;
+            }
 
-                if (authError) throw authError
+            // 3. Rate Limit Handling with Retries
+            let retries = 0;
+            const maxRetries = 3;
+            let success = false;
 
-                if (authData.user) {
-                    newFiles[i].status = 'success'
-                    newFiles[i].message = `가입 완료 (${newFiles[i].grade ? newFiles[i].grade : '반 정보 없음'})`
-                } else {
-                    if (authData.user === null) throw new Error("User creation returned null")
-                    newFiles[i].status = 'success'
+            while (!success && retries < maxRetries) {
+                try {
+                    // Dynamic delay: Increase delay as we progress to cool down
+                    const baseDelay = 2500; // 2.5 seconds base
+                    const currentDelay = baseDelay + (retries * 2000);
+
+                    if (i > 0 || retries > 0) await delay(currentDelay)
+
+                    const uniqueId = Math.random().toString(36).substring(2, 8)
+                    const email = `student_${Date.now()}_${uniqueId}@classin.com`
+                    const password = '123456'
+
+                    const { data: authData, error: authError } = await supabase.auth.signUp({
+                        email,
+                        password,
+                        options: {
+                            data: {
+                                full_name: studentName,
+                                grade: newFiles[i].grade
+                            }
+                        },
+                    })
+
+                    if (authError) throw authError
+
+                    if (authData.user) {
+                        newFiles[i].status = 'success'
+                        newFiles[i].message = `가입 완료 (${newFiles[i].grade ? newFiles[i].grade : '반 정보 없음'})`
+                        success = true;
+                        // Add to existing names so we don't try to add them again if they appear twice in the list
+                        existingNames.add(studentName);
+                    } else {
+                        if (authData.user === null) throw new Error("User creation returned null")
+                        newFiles[i].status = 'success'
+                        success = true;
+                    }
+
+                } catch (error: any) {
+                    console.error(`Attempt ${retries + 1} failed for ${studentName}:`, error.message)
+
+                    if (error.message.includes('Rate limit') || error.status === 429) {
+                        retries++;
+                        newFiles[i].message = `속도 제한 대기 중... (${retries}/${maxRetries})`
+                        setFiles([...newFiles])
+                        await delay(5000 * retries); // Wait 5s, 10s, 15s...
+                    } else {
+                        // Non-retryable error
+                        newFiles[i].status = 'error'
+                        newFiles[i].message = error.message
+                        break;
+                    }
                 }
+            }
 
-            } catch (error: any) {
-                console.error(error)
+            if (!success && newFiles[i].status !== 'error') {
                 newFiles[i].status = 'error'
-                newFiles[i].message = error.message
-
-                // If rate limited, wait longer and try one more time?
-                // Or just let it fail and user can retry pending.
-                // Let's just pause a bit more if error happens
-                await delay(2000)
+                newFiles[i].message = '가입 실패 (시간 초과)'
             }
 
             setFiles([...newFiles])
@@ -272,7 +321,8 @@ export default function BatchStudentPage() {
                                     <div
                                         key={idx}
                                         className={`flex items-center justify-between p-3 rounded-md border ${item.status === 'success' ? 'bg-green-50 border-green-200' :
-                                            item.status === 'error' ? 'bg-red-50 border-red-200' : 'bg-white'
+                                            item.status === 'error' && item.message?.includes('이미 등록') ? 'bg-yellow-50 border-yellow-200' :
+                                                item.status === 'error' ? 'bg-red-50 border-red-200' : 'bg-white'
                                             }`}
                                     >
                                         <div className="flex items-center space-x-3 overflow-hidden">

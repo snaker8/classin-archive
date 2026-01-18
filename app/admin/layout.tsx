@@ -18,28 +18,43 @@ export default function AdminLayout({
 
   useEffect(() => {
     const checkAuth = async () => {
+      // 10초 타임아웃 설정
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Auth check timeout')), 10000)
+      })
+
       try {
-        const profile = await getCurrentProfile()
-        
-        if (!profile) {
-          router.push('/login')
-          return
-        }
+        await Promise.race([
+          (async () => {
+            const profile = await getCurrentProfile()
 
-        if (profile.role !== 'admin') {
-          router.push('/student/dashboard')
-          return
-        }
+            if (!profile) {
+              console.log('No profile found, redirecting to login')
+              router.push('/login')
+              return
+            }
 
-        setUserName(profile.full_name)
+            if (profile.role !== 'admin') {
+              console.log('Not admin, redirecting to student dashboard')
+              router.push('/student/dashboard')
+              return
+            }
+
+            setUserName(profile.full_name)
+          })(),
+          timeoutPromise
+        ])
       } catch (error) {
         console.error('Auth error:', error)
         router.push('/login')
       } finally {
-        setLoading(false)
+        if (mounted) {
+          setLoading(false)
+        }
       }
     }
 
+    let mounted = true
     checkAuth()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
@@ -49,13 +64,19 @@ export default function AdminLayout({
     })
 
     return () => {
+      mounted = false
       subscription.unsubscribe()
     }
   }, [router])
 
   const handleSignOut = async () => {
-    await signOut()
-    router.push('/login')
+    try {
+      await signOut()
+    } catch (error) {
+      console.error('Sign out error:', error)
+    } finally {
+      router.push('/login')
+    }
   }
 
   if (loading) {
@@ -94,7 +115,7 @@ export default function AdminLayout({
       <main className="container mx-auto px-4 py-6">
         {children}
       </main>
-      
+
       <Toaster />
     </div>
   )

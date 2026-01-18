@@ -166,13 +166,18 @@ export default function NewClassPage() {
   }, [watchDate])
 
   const loadStudents = async () => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('role', 'student')
-      .order('full_name')
-
-    setStudents(data || [])
+    try {
+      const { getStudents } = await import('@/app/actions/student')
+      const { students } = await getStudents()
+      setStudents(students)
+    } catch (error) {
+      console.error('Failed to load students', error)
+      toast({
+        title: "학생 목록 로드 실패",
+        description: "학생 목록을 불러오지 못했습니다.",
+        variant: "destructive"
+      })
+    }
   }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -348,8 +353,8 @@ export default function NewClassPage() {
                   setValue('studentId', student.id)
                 }}
                 className={`w-full text-left p-3 rounded-lg transition-colors ${selectedStudent?.id === student.id
-                    ? 'bg-primary text-primary-foreground'
-                    : 'hover:bg-gray-100'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-gray-100'
                   }`}
               >
                 <div className="font-medium">{student.full_name}</div>
@@ -452,8 +457,8 @@ export default function NewClassPage() {
               <div
                 {...getRootProps()}
                 className={`border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-colors ${isDragActive
-                    ? 'border-primary bg-primary/5'
-                    : 'border-gray-300 hover:border-primary'
+                  ? 'border-primary bg-primary/5'
+                  : 'border-gray-300 hover:border-primary'
                   }`}
               >
                 <input {...getInputProps()} />
