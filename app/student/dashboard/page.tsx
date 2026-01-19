@@ -68,60 +68,19 @@ export default function StudentDashboard() {
       const user = await getCurrentUser()
       if (!user) return
 
-      // Fetch classes
-      const { data: classesData, error: classesError } = await supabase
-        .from('classes')
-        .select('*')
-        .eq('student_id', user.id)
-        .order('class_date', { ascending: false })
+      // Use Server Action
+      const { getStudentClasses } = await import('@/app/actions/class')
+      const { classes: fetchedClasses, error } = await getStudentClasses(user.id)
 
-      if (classesError) throw classesError
+      if (error) {
+        console.error('Error loading classes:', error)
+        return
+      }
 
-      // Get all class IDs
-      const classIds = classesData?.map(c => c.id) || []
-
-      // Fetch materials for all classes
-      const { data: materialsData } = await supabase
-        .from('materials')
-        .select('class_id, type, content_url, order_index')
-        .in('class_id', classIds)
-        .order('order_index', { ascending: true })
-
-      // Group materials by class_id
-      const materialsByClass: Record<string, any[]> = {}
-      materialsData?.forEach(material => {
-        if (!materialsByClass[material.class_id]) {
-          materialsByClass[material.class_id] = []
-        }
-        materialsByClass[material.class_id].push(material)
-      })
-
-      // Process classes with thumbnails and counts
-      const processedClasses: ClassWithThumbnail[] = classesData?.map(cls => {
-        const materials = materialsByClass[cls.id] || []
-        const images = materials.filter(m => m.type === 'blackboard_image')
-        const videos = materials.filter(m => m.type === 'video_link')
-
-        // Get first image as thumbnail
-        const thumbnail = images[0]?.content_url || null
-
-        // Check if new (within 3 days)
-        const daysDiff = differenceInDays(new Date(), new Date(cls.created_at))
-        const isNew = daysDiff <= 3
-
-        return {
-          ...cls,
-          thumbnail_url: thumbnail,
-          material_count: images.length,
-          video_count: videos.length,
-          is_new: isNew,
-        }
-      }) || []
-
-      setClasses(processedClasses)
+      setClasses(fetchedClasses || [])
 
       // Extract dates for calendar
-      const dates = new Set(processedClasses.map(c => c.class_date))
+      const dates = new Set((fetchedClasses || []).map(c => c.class_date))
       setClassesWithDates(dates)
     } catch (error) {
       console.error('Error loading classes:', error)
@@ -427,7 +386,7 @@ export default function StudentDashboard() {
                 <div className="flex items-center space-x-4 text-xs text-muted-foreground">
                   <div className="flex items-center">
                     <BookOpen className="h-3 w-3 mr-1" />
-                    <span>{cls.material_count}페이지</span>
+                    <span>자료 {cls.material_count}개</span>
                   </div>
                   {cls.video_count > 0 && (
                     <div className="flex items-center">

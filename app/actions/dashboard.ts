@@ -39,9 +39,29 @@ export async function getDashboardData() {
             .from('materials')
             .select('*', { count: 'exact', head: true })
 
+        // 4. Get unique class titles for filtering
+        const { data: allClasses } = await supabaseAdmin
+            .from('classes')
+            .select('title, student_id')
+
+        const uniqueClassTitles = [...new Set((allClasses || []).map(c => c.title))].sort()
+
+        // Build student-to-class mapping
+        const studentClassMap: Record<string, Set<string>> = {}
+        for (const cls of (allClasses || [])) {
+            if (!studentClassMap[cls.student_id]) {
+                studentClassMap[cls.student_id] = new Set()
+            }
+            studentClassMap[cls.student_id].add(cls.title)
+        }
+
         return {
             students: students || [],
             recentClasses: recentClasses || [],
+            uniqueClassTitles,
+            studentClassMap: Object.fromEntries(
+                Object.entries(studentClassMap).map(([k, v]) => [k, Array.from(v)])
+            ),
             stats: {
                 totalStudents: studentCount || 0,
                 totalClasses: classCount || 0,

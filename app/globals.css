@@ -92,3 +92,20 @@
   font-weight: bold;
   color: var(--rdp-accent-color);
 }
+
+/* Calendar Date Inspector Dot Style */
+.has-class-day {
+  position: relative;
+}
+
+.has-class-day::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  background-color: hsl(var(--primary));
+  border-radius: 50%;
+}

@@ -4,13 +4,17 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 
 export async function createStudent(prevState: any, formData: FormData) {
-    const email = formData.get('email') as string
+    const phoneNumber = formData.get('phoneNumber') as string
     const password = formData.get('password') as string
     const fullName = formData.get('fullName') as string
 
-    if (!email || !password || !fullName) {
+    if (!phoneNumber || !password || !fullName) {
         return { error: '모든 필드를 입력해주세요.' }
     }
+
+    // Convert phone number to email format for Supabase Auth
+    const cleanPhone = phoneNumber.replace(/[-\s]/g, '')
+    const email = `${cleanPhone}@student.local`
 
     try {
         // 1. Create user in Supabase Auth
@@ -19,7 +23,8 @@ export async function createStudent(prevState: any, formData: FormData) {
             password,
             email_confirm: true, // Auto confirm email
             user_metadata: {
-                full_name: fullName
+                full_name: fullName,
+                phone_number: phoneNumber
             }
         })
 
@@ -148,5 +153,39 @@ export async function getStudents() {
     } catch (error) {
         console.error('Error fetching students:', error)
         return { students: [] }
+    }
+}
+
+export async function getStudentDetails(studentId: string) {
+    try {
+        // 1. Fetch Profile
+        const { data: profile, error: profileError } = await supabaseAdmin
+            .from('profiles')
+            .select('*')
+            .eq('id', studentId)
+            .single()
+
+        if (profileError) throw profileError
+
+        // 2. Fetch Classes with Material counts
+        // we can join materials to get counts
+        const { data: classes, error: classesError } = await supabaseAdmin
+            .from('classes')
+            .select(`
+                *,
+                materials:materials(*)
+            `)
+            .eq('student_id', studentId)
+            .order('class_date', { ascending: false })
+
+        if (classesError) throw classesError
+
+        return {
+            student: profile,
+            classes: classes || []
+        }
+    } catch (error: any) {
+        console.error('Error fetching student details:', error)
+        return { error: '학생 정보를 불러오는데 실패했습니다.' }
     }
 }

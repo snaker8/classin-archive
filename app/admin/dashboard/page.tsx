@@ -23,6 +23,9 @@ export default function AdminDashboard() {
   })
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectedClassFilter, setSelectedClassFilter] = useState('')
+  const [uniqueClassTitles, setUniqueClassTitles] = useState<string[]>([])
+  const [studentClassMap, setStudentClassMap] = useState<Record<string, string[]>>({})
 
   useEffect(() => {
     loadDashboardData()
@@ -35,6 +38,8 @@ export default function AdminDashboard() {
       setStudents(data.students)
       setRecentClasses(data.recentClasses as any)
       setStats(data.stats)
+      setUniqueClassTitles(data.uniqueClassTitles || [])
+      setStudentClassMap(data.studentClassMap || {})
     } catch (error) {
       console.error('Error loading dashboard data:', error)
     } finally {
@@ -42,10 +47,15 @@ export default function AdminDashboard() {
     }
   }
 
-  const filteredStudents = students.filter(student =>
-    student.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    student.email.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredStudents = students.filter(student => {
+    const matchesSearch = student.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      student.email.toLowerCase().includes(searchQuery.toLowerCase())
+
+    const matchesClass = !selectedClassFilter ||
+      (studentClassMap[student.id] && studentClassMap[student.id].includes(selectedClassFilter))
+
+    return matchesSearch && matchesClass
+  })
 
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set())
 
@@ -196,7 +206,17 @@ export default function AdminDashboard() {
                     <div className="font-medium">{cls.title}</div>
                     <div className="text-sm text-muted-foreground flex items-center mt-1">
                       <Users className="h-3 w-3 mr-1" />
-                      {cls.student?.full_name}
+                      <span
+                        className="hover:underline cursor-pointer text-primary hover:text-blue-700 transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (cls.student?.id) {
+                            router.push(`/admin/students/${cls.student.id}`)
+                          }
+                        }}
+                      >
+                        {cls.student?.full_name}
+                      </span>
                       <span className="mx-2">•</span>
                       <Calendar className="h-3 w-3 mr-1" />
                       {formatDate(cls.class_date)}
@@ -239,6 +259,18 @@ export default function AdminDashboard() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+            {uniqueClassTitles.length > 0 && (
+              <select
+                value={selectedClassFilter}
+                onChange={(e) => setSelectedClassFilter(e.target.value)}
+                className="p-2 border rounded-md bg-white text-sm"
+              >
+                <option value="">모든 반</option>
+                {uniqueClassTitles.map(title => (
+                  <option key={title} value={title}>{title}</option>
+                ))}
+              </select>
+            )}
           </div>
         </CardHeader>
 
@@ -264,7 +296,12 @@ export default function AdminDashboard() {
                       onChange={() => toggleSelectStudent(student.id)}
                     />
                     <div>
-                      <div className="font-medium">{student.full_name}</div>
+                      <div
+                        className="font-medium hover:underline cursor-pointer text-primary"
+                        onClick={() => router.push(`/admin/students/${student.id}`)}
+                      >
+                        {student.full_name}
+                      </div>
                       <div className="text-sm text-muted-foreground">{student.email}</div>
                     </div>
                   </div>

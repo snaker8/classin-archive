@@ -70,15 +70,15 @@ export default function NewStudentPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">이메일 (로그인 ID)</label>
+              <label className="text-sm font-medium">전화번호 (로그인 ID)</label>
               <Input
-                type="email"
-                name="email"
-                placeholder="student@example.com"
+                type="tel"
+                name="phoneNumber"
+                placeholder="01012345678"
                 required
               />
               <p className="text-xs text-muted-foreground">
-                이 이메일로 로그인합니다
+                이 전화번호로 로그인합니다
               </p>
             </div>
 

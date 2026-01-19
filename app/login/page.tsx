@@ -11,7 +11,7 @@ import { BookOpen } from 'lucide-react'
 export default function LoginPage() {
   const router = useRouter()
   const [isLogin, setIsLogin] = useState(true)
-  const [email, setEmail] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -26,6 +26,16 @@ export default function LoginPage() {
 
     try {
       if (isLogin) {
+        // Detect if input is email or phone number
+        let email: string
+        if (phoneNumber.includes('@')) {
+          // Input is already an email (admin login)
+          email = phoneNumber
+        } else {
+          // Input is a phone number (student login) - convert to email format
+          email = `${phoneNumber.replace(/-/g, '')}@student.local`
+        }
+
         const { user } = await signIn(email, password)
 
         // Get user profile to determine role
@@ -44,6 +54,7 @@ export default function LoginPage() {
       } else {
         // Sign Up
         const { signUp } = await import('@/lib/supabase/client')
+        const email = `${phoneNumber.replace(/-/g, '')}@student.local`
         await signUp(email, password, fullName)
         setMessage('회원가입이 완료되었습니다. 자동으로 로그인합니다...')
 
@@ -108,18 +119,21 @@ export default function LoginPage() {
               </div>
             )}
             <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">
-                이메일
+              <label htmlFor="phone" className="text-sm font-medium">
+                전화번호 또는 이메일
               </label>
               <Input
-                id="email"
-                type="email"
-                placeholder="student@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="phone"
+                type="text"
+                placeholder="01012345678 또는 admin@example.com"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
                 required
                 disabled={loading}
               />
+              <p className="text-xs text-muted-foreground">
+                학생: 전화번호 / 관리자: 이메일
+              </p>
             </div>
             <div className="space-y-2">
               <label htmlFor="password" className="text-sm font-medium">
@@ -167,6 +181,22 @@ export default function LoginPage() {
                 {isLogin ? '회원가입' : '로그인'}
               </Button>
             </div>
+
+            {isLogin && (
+              <div className="text-center mt-2 text-sm border-t pt-4">
+                <span className="text-muted-foreground">
+                  기존 이메일 계정이 있으신가요?
+                </span>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="p-0 ml-2 h-auto text-orange-600"
+                  onClick={() => window.location.href = '/migrate-phone'}
+                >
+                  전화번호로 변경하기
+                </Button>
+              </div>
+            )}
           </form>
         </CardContent>
       </Card>

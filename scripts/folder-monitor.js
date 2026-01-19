@@ -68,7 +68,29 @@ async function processFile(filePath, rootDir) {
     const studentFile = parts[parts.length - 1];
 
     const dateMatch = dateFolder.match(/(\d{4}-\d{2}-\d{2})/);
-    const classDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
+
+    // If no date found in dateFolder, search all path parts
+    let classDate = null;
+    if (dateMatch) {
+        classDate = dateMatch[1];
+    } else {
+        // Search all parts for a date pattern (more flexible)
+        for (const part of parts) {
+            const match = part.match(/(\d{4})-?(\d{2})-?(\d{2})/);
+            if (match) {
+                classDate = `${match[1]}-${match[2]}-${match[3]}`;
+                break;
+            }
+        }
+    }
+
+    // Fallback to today if no date found
+    if (!classDate) {
+        classDate = new Date().toISOString().split('T')[0];
+        console.log(`[WARN] No date found in path, using today: ${relativePath}`);
+    }
+
+    console.log(`[DEBUG] Processing: ${relativePath} -> Date: ${classDate}, Class: ${className}`);
 
     // Extract Name
     // Pattern: "1_Name.png" or "Name.png" or "3_Name_hash.png"
