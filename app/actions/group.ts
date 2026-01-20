@@ -14,7 +14,7 @@ export async function getGroups(search: string = '') {
                 members:group_members(count),
                 teacher:teachers(*)
             `)
-            .order('created_at', { ascending: false })
+        // .order('created_at', { ascending: false }) // Remove DB sort, we will sort in JS
 
         if (search) {
             query = query.ilike('name', `%${search}%`)
@@ -24,7 +24,11 @@ export async function getGroups(search: string = '') {
 
         if (error) throw error
 
-        return { groups: data || [] }
+        // Natural sort by name (e.g. "1학년", "2학년", "10학년")
+        const groups = data || []
+        groups.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+
+        return { groups }
     } catch (error: any) {
         console.error('Error fetching groups:', error)
         return { error: '반 목록을 불러오지 못했습니다.' }

@@ -144,7 +144,15 @@ export async function getStudents() {
     try {
         const { data: students, error } = await supabaseAdmin
             .from('profiles')
-            .select('*')
+            .select(`
+                *,
+                group_members (
+                    group:groups (
+                        id,
+                        name
+                    )
+                )
+            `)
             .eq('role', 'student')
             .order('full_name') // Order by name for easier searching
 
@@ -191,6 +199,8 @@ export async function getStudentDetails(studentId: string) {
         if (groupsError) throw groupsError
 
         const enrolledGroups = groupMembers?.map((gm: any) => gm.group) || []
+        // Natural sort enrolled groups
+        enrolledGroups.sort((a: any, b: any) => a.name.localeCompare(b.name, undefined, { numeric: true }))
 
         return {
             student: profile,

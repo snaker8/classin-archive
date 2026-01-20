@@ -125,14 +125,26 @@ export default function GroupDetailPage({ params }: { params: { id: string } }) 
                                 ) : (
                                     filteredStudents.map(student => (
                                         <div key={student.id} className="flex items-center justify-between p-2 border rounded hover:bg-accent/50 transition-colors">
-                                            <div className="flex items-center gap-3">
-                                                <Avatar className="h-8 w-8">
+                                            <div className="flex items-center gap-3 overflow-hidden">
+                                                <Avatar className="h-8 w-8 shrink-0">
                                                     <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${student.full_name}`} />
                                                     <AvatarFallback>{student.full_name[0]}</AvatarFallback>
                                                 </Avatar>
-                                                <span className="font-medium">{student.full_name}</span>
+                                                <div className="flex flex-col min-w-0">
+                                                    <span className="font-medium truncate">{student.full_name}</span>
+                                                    {student.group_members && student.group_members.length > 0 && (
+                                                        <div className="text-xs text-muted-foreground truncate">
+                                                            수강중: {student.group_members
+                                                                .map((gm: any) => gm.group)
+                                                                .filter((g: any) => g)
+                                                                .sort((a: any, b: any) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+                                                                .map((g: any) => g.name)
+                                                                .join(', ')}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <Button size="sm" onClick={() => handleAddMember(student.id)}>
+                                            <Button size="sm" onClick={() => handleAddMember(student.id)} className="shrink-0 ml-2">
                                                 선택
                                             </Button>
                                         </div>

@@ -15,6 +15,13 @@ export async function getTeachers() {
 
         if (error) throw error
 
+        // Sort groups for each teacher naturally
+        teachers?.forEach((teacher: any) => {
+            if (teacher.groups) {
+                teacher.groups.sort((a: any, b: any) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+            }
+        })
+
         return { teachers }
     } catch (error: any) {
         console.error('Error fetching teachers:', error)

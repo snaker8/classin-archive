@@ -36,6 +36,10 @@ export default function GroupsPage() {
     const [selectedTeacherId, setSelectedTeacherId] = useState<string>('')
     const [editTeacherId, setEditTeacherId] = useState<string>('')
 
+    // Filter State
+    const [selectedGrade, setSelectedGrade] = useState<string>('ALL')
+    const [availableGrades, setAvailableGrades] = useState<string[]>([])
+
     useEffect(() => {
         loadTeachers()
     }, [])
@@ -113,6 +117,54 @@ export default function GroupsPage() {
         }
     }
 
+    useEffect(() => {
+        if (groups.length > 0) {
+            // Extract grades
+            const grades = new Set<string>()
+            groups.forEach(g => {
+                // 1. Try "중1", "고2", "초3" pattern at start
+                const schoolMatch = g.name.match(/^([초중고]\d+)/)
+                if (schoolMatch) {
+                    grades.add(schoolMatch[1])
+                    return
+                }
+
+                // 2. Try "1학년" pattern
+                const gradeMatch = g.name.match(/^(\d+학년)/)
+                if (gradeMatch) {
+                    grades.add(gradeMatch[1])
+                    return
+                }
+
+                // 3. Fallback: Check if '학년' exists anywhere
+                if (g.name.includes('학년')) {
+                    const parts = g.name.split(' ')
+                    const gradePart = parts.find((p: string) => p.includes('학년'))
+                    if (gradePart) grades.add(gradePart)
+                    else grades.add('기타')
+                    return
+                }
+
+                grades.add('기타')
+            })
+            // Natural sort grades
+            const sortedGrades = Array.from(grades).sort((a, b) =>
+                a.localeCompare(b, undefined, { numeric: true })
+            )
+            setAvailableGrades(sortedGrades)
+        }
+    }, [groups])
+
+    const filteredGroups = selectedGrade === 'ALL'
+        ? groups
+        : groups.filter(g => {
+            if (selectedGrade === '기타') {
+                return !g.name.match(/^([초중고]\d+)/) && !g.name.includes('학년')
+            }
+            // For "중1", "1학년" etc, check if name starts with it
+            return g.name.startsWith(selectedGrade) || g.name.includes(selectedGrade)
+        })
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -184,6 +236,31 @@ export default function GroupsPage() {
                 </Dialog>
             </div>
 
+            {/* Filter Tabs */}
+            {availableGrades.length > 0 && (
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                    <Button
+                        variant={selectedGrade === 'ALL' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setSelectedGrade('ALL')}
+                        className="rounded-full"
+                    >
+                        전체
+                    </Button>
+                    {availableGrades.map(grade => (
+                        <Button
+                            key={grade}
+                            variant={selectedGrade === grade ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setSelectedGrade(grade)}
+                            className="rounded-full"
+                        >
+                            {grade}
+                        </Button>
+                    ))}
+                </div>
+            )}
+
             {/* Search Bar */}
             <div className="relative max-w-sm">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -199,7 +276,7 @@ export default function GroupsPage() {
                 <div className="text-center py-8">로딩 중...</div>
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {groups.map((group) => (
+                    {filteredGroups.map((group) => (
                         <Card key={group.id} className="hover:shadow-md transition-shadow cursor-pointer relative group" onClick={() => router.push(`/admin/groups/${group.id}`)}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-xl font-bold truncate pr-8">
@@ -244,9 +321,9 @@ export default function GroupsPage() {
                         </Card>
                     ))}
 
-                    {groups.length === 0 && (
+                    {filteredGroups.length === 0 && (
                         <div className="col-span-full text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
-                            {searchTerm ? '검색 결과가 없습니다.' : '생성된 반이 없습니다.'}
+                            {searchTerm ? '검색 결과가 없습니다.' : (selectedGrade !== 'ALL' ? '해당 학년의 반이 없습니다.' : '생성된 반이 없습니다.')}
                         </div>
                     )}
                 </div>
