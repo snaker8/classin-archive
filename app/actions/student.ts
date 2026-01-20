@@ -180,9 +180,22 @@ export async function getStudentDetails(studentId: string) {
 
         if (classesError) throw classesError
 
+        // 3. Fetch Enrolled Groups
+        const { data: groupMembers, error: groupsError } = await supabaseAdmin
+            .from('group_members')
+            .select(`
+                group:groups(*)
+            `)
+            .eq('student_id', studentId)
+
+        if (groupsError) throw groupsError
+
+        const enrolledGroups = groupMembers?.map((gm: any) => gm.group) || []
+
         return {
             student: profile,
-            classes: classes || []
+            classes: classes || [],
+            enrolledGroups
         }
     } catch (error: any) {
         console.error('Error fetching student details:', error)

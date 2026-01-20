@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase, getCurrentProfile, signOut } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/toaster'
-import { BookOpen, LogOut, Settings } from 'lucide-react'
+import { BookOpen, LogOut, Settings, Users, User } from 'lucide-react'
 
 export default function AdminLayout({
   children,
@@ -95,7 +95,7 @@ export default function AdminLayout({
       <header className="bg-white border-b sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-3 cursor-pointer" onClick={() => router.push('/admin/dashboard')}>
               <div className="p-2 bg-primary rounded-lg">
                 <Settings className="h-6 w-6 text-white" />
               </div>
@@ -104,10 +104,24 @@ export default function AdminLayout({
                 <p className="text-sm text-muted-foreground">{userName}님</p>
               </div>
             </div>
-            <Button variant="ghost" size="sm" onClick={handleSignOut}>
-              <LogOut className="h-4 w-4 mr-2" />
-              로그아웃
-            </Button>
+            <div className="flex items-center space-x-2">
+              <Button variant="ghost" size="sm" onClick={() => router.push('/admin/dashboard')}>
+                <BookOpen className="h-4 w-4 mr-2" />
+                홈
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => router.push('/admin/groups')}>
+                <Users className="h-4 w-4 mr-2" />
+                반 관리
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => router.push('/admin/teachers')}>
+                <User className="h-4 w-4 mr-2" />
+                선생님 관리
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleSignOut}>
+                <LogOut className="h-4 w-4 mr-2" />
+                로그아웃
+              </Button>
+            </div>
           </div>
         </div>
       </header>

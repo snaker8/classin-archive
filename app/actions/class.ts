@@ -278,3 +278,105 @@ export async function updateClass(classId: string, data: { title?: string; descr
         return { error: '수업 수정 중 오류가 발생했습니다.' }
     }
 }
+
+export async function createClass(data: { student_id: string; title: string; description?: string; class_date: string }) {
+    try {
+        const { data: newClass, error } = await supabaseAdmin
+            .from('classes')
+            .insert(data)
+            .select()
+            .single()
+
+        if (error) throw error
+        return { success: true, class: newClass }
+    } catch (error: any) {
+        console.error('Error creating class:', error)
+        return { error: '수업 생성 중 오류가 발생했습니다.' }
+    }
+}
+
+export async function createClassForGroup(groupId: string, data: { title: string; description?: string; class_date: string }) {
+    try {
+        // 1. Get all members of the group
+        const { data: members, error: membersError } = await supabaseAdmin
+            .from('group_members')
+            .select('student_id')
+            .eq('group_id', groupId)
+
+        if (membersError) throw membersError
+        if (!members || members.length === 0) return { error: '선택한 반에 학생이 없습니다.' }
+
+        // 2. Prepare class data for each student
+        const classesToInsert = members.map(m => ({
+            student_id: m.student_id,
+            title: data.title,
+            description: data.description,
+            class_date: data.class_date
+        }))
+
+        // 3. Batch insert classes
+        const { data: newClasses, error: insertError } = await supabaseAdmin
+            .from('classes')
+            .insert(classesToInsert)
+            .select()
+
+        if (insertError) throw insertError
+
+        return { success: true, count: newClasses.length, classes: newClasses }
+    } catch (error: any) {
+        console.error('Error creating class for group:', error)
+        return { error: '반 일괄 수업 생성 중 오류가 발생했습니다.' }
+    }
+}
+
+export async function createMaterials(materials: any[]) {
+    try {
+        if (!materials || materials.length === 0) return { success: true, count: 0 };
+
+        const { data, error } = await supabaseAdmin
+            .from('materials')
+            .insert(materials)
+            .select()
+
+        if (error) throw error
+
+        return { success: true, count: data.length, materials: data }
+    } catch (error: any) {
+        console.error('Error creating materials:', error)
+        return { error: '자료 저장 중 오류가 발생했습니다.' }
+    }
+}
+
+export async function uploadImage(formData: FormData) {
+    try {
+        const file = formData.get('file') as File
+        const path = formData.get('path') as string
+
+        if (!file || !path) throw new Error('File or path missing')
+
+        // Convert file to buffer for Supabase Admin upload
+        const arrayBuffer = await file.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
+
+        const { data, error } = await supabaseAdmin
+            .storage
+            .from('blackboard-images')
+            .upload(path, buffer, {
+                contentType: file.type,
+                upsert: true
+            })
+
+        if (error) throw error
+
+        // Get public URL
+        const { data: urlData } = supabaseAdmin
+            .storage
+            .from('blackboard-images')
+            .getPublicUrl(path)
+
+        return { success: true, url: urlData.publicUrl }
+    } catch (error: any) {
+        console.error('Error uploading image:', error)
+        return { error: '이미지 업로드 실패: ' + error.message }
+    }
+}

@@ -29,7 +29,7 @@ export interface Class {
 export interface Material {
   id: string
   class_id: string
-  type: 'blackboard_image' | 'video_link'
+  type: 'blackboard_image' | 'video_link' | 'teacher_blackboard_image'
   content_url: string
   title: string | null
   order_index: number

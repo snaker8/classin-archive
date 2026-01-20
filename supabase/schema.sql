@@ -29,7 +29,7 @@ CREATE TABLE classes (
 CREATE TABLE materials (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   class_id UUID REFERENCES classes(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('blackboard_image', 'video_link')),
+  type TEXT NOT NULL CHECK (type IN ('blackboard_image', 'video_link', 'teacher_blackboard_image')),
   content_url TEXT NOT NULL,
   title TEXT,
   order_index INTEGER NOT NULL DEFAULT 0,
@@ -234,3 +234,56 @@ CREATE TRIGGER update_materials_updated_at
 --   '관리자',
 --   'admin'
 -- );
+
+-- ============================================
+-- 4. 그룹 테이블 (groups)
+-- ============================================
+CREATE TABLE IF NOT EXISTS groups (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  description TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- ============================================
+-- 5. 그룹 멤버 테이블 (group_members)
+-- ============================================
+CREATE TABLE IF NOT EXISTS group_members (
+  group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+  student_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  joined_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  PRIMARY KEY (group_id, student_id)
+);
+
+-- ============================================
+-- 그룹 관련 RLS 정책
+-- ============================================
+
+ALTER TABLE groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE group_members ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Enable read access for all users" ON groups FOR SELECT USING (true);
+CREATE POLICY "Enable read access for all users" ON group_members FOR SELECT USING (true);
+
+
+-- ============================================
+-- 6. 선생님 테이블 (teachers)
+-- ============================================
+CREATE TABLE IF NOT EXISTS teachers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- groups 테이블에 teacher_id 추가
+ALTER TABLE groups ADD COLUMN IF NOT EXISTS teacher_id UUID REFERENCES teachers(id) ON DELETE SET NULL;
+
+-- teachers 테이블 RLS
+ALTER TABLE teachers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON teachers FOR SELECT USING (true);
+CREATE POLICY "Enable write access for admins" ON teachers FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  )
+);

@@ -383,15 +383,19 @@ export default function StudentDashboard() {
                 )}
 
                 {/* Stats */}
-                <div className="flex items-center space-x-4 text-xs text-muted-foreground">
-                  <div className="flex items-center">
-                    <BookOpen className="h-3 w-3 mr-1" />
-                    <span>자료 {cls.material_count}개</span>
-                  </div>
+                <div className="flex items-center space-x-2 text-xs">
+                  {/* Blackboard Badge */}
+                  {(cls.material_count - cls.video_count > 0) && (
+                    <div className="flex items-center bg-blue-100 text-blue-700 px-2 py-1 rounded font-medium">
+                      <BookOpen className="h-3 w-3 mr-1" />
+                      <span>판서</span>
+                    </div>
+                  )}
+                  {/* Video Badge */}
                   {cls.video_count > 0 && (
-                    <div className="flex items-center">
+                    <div className="flex items-center bg-red-100 text-red-700 px-2 py-1 rounded font-medium">
                       <Video className="h-3 w-3 mr-1" />
-                      <span>{cls.video_count}개 영상</span>
+                      <span>영상</span>
                     </div>
                   )}
                 </div>

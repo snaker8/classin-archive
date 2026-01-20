@@ -7,7 +7,10 @@ const readline = require('readline');
 const CONFIG_FILE = path.join(__dirname, 'monitor-config.json');
 
 // 1. Manually load .env.local
-const envPath = path.join(__dirname, '..', '.env.local');
+const envPathCurrent = path.join(__dirname, '.env.local');
+const envPathParent = path.join(__dirname, '..', '.env.local');
+const envPath = fs.existsSync(envPathCurrent) ? envPathCurrent : envPathParent;
+
 if (fs.existsSync(envPath)) {
     const envConfig = fs.readFileSync(envPath, 'utf8');
     envConfig.split('\n').forEach(line => {
@@ -54,27 +57,43 @@ function getAllFiles(dirPath, arrayOfFiles) {
 }
 // -----------------------
 
-async function processFile(filePath, rootDir) {
-    const fileName = path.basename(filePath);
-    if (fileName.startsWith('.') || !fileName.match(/\.(png|jpg|jpeg|gif|webp)$/i)) return;
+// Memory cache to prevent processing the same file multiple times in a short window
+const processedFiles = new Set();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
+function addToCache(filePath) {
+    processedFiles.add(filePath);
+    setTimeout(() => {
+        processedFiles.delete(filePath);
+    }, CACHE_DURATION);
+}
+
+function isVideo(fileName) {
+    return fileName.match(/\.(mp4|mov|avi|wmv|mkv|webm)$/i);
+}
+
+function isImage(fileName) {
+    return fileName.match(/\.(png|jpg|jpeg|gif|webp)$/i);
+}
+
+function parsePath(filePath, rootDir) {
     const relativePath = path.relative(rootDir, filePath);
     const parts = relativePath.split(path.sep);
 
-    if (parts.length < 3) return; // Need Class/Date/File
+    if (parts.length < 3) {
+        // console.log(`[SKIP] Path too short: ${relativePath}`);
+        return {};
+    }
 
     const className = parts[0];
     const dateFolder = parts[1];
-    const studentFile = parts[parts.length - 1];
 
+    // Date parsing
     const dateMatch = dateFolder.match(/(\d{4}-\d{2}-\d{2})/);
+    let classDate = dateMatch ? dateMatch[1] : null;
 
-    // If no date found in dateFolder, search all path parts
-    let classDate = null;
-    if (dateMatch) {
-        classDate = dateMatch[1];
-    } else {
-        // Search all parts for a date pattern (more flexible)
+    // Backup date parsing from all parts if folder name isn't strict date
+    if (!classDate) {
         for (const part of parts) {
             const match = part.match(/(\d{4})-?(\d{2})-?(\d{2})/);
             if (match) {
@@ -84,38 +103,115 @@ async function processFile(filePath, rootDir) {
         }
     }
 
-    // Fallback to today if no date found
     if (!classDate) {
         classDate = new Date().toISOString().split('T')[0];
-        console.log(`[WARN] No date found in path, using today: ${relativePath}`);
     }
 
-    console.log(`[DEBUG] Processing: ${relativePath} -> Date: ${classDate}, Class: ${className}`);
+    return { className, classDate, relativePath, dateFolder, parts };
+}
+
+// MAIN DISPATCHER
+async function processFile(filePath, rootDir) {
+    if (processedFiles.has(filePath)) return;
+
+    const fileName = path.basename(filePath);
+    if (fileName.startsWith('.')) return;
+
+    if (isVideo(fileName)) {
+        await processVideo(filePath, rootDir, fileName);
+    } else if (isImage(fileName)) {
+        await processImage(filePath, rootDir, fileName);
+    }
+}
+
+// Process Video (Shared Class Material)
+async function processVideo(filePath, rootDir, fileName) {
+    const { className, classDate, relativePath } = parsePath(filePath, rootDir);
+    if (!className || !classDate) return;
+
+    console.log(`[VIDEO DETECTED] ${className} - ${classDate} : ${fileName}`);
+
+    try {
+        // 1. Upload to Shared Storage (if not exists)
+        const safeFileName = `${Date.now()}_${fileName}`;
+        const storagePath = `_shared/${className}/${classDate}/${safeFileName}`;
+        const fileContent = fs.readFileSync(filePath);
+
+        // Simple ContentType detection
+        let contentType = 'video/mp4';
+        if (fileName.toLowerCase().endsWith('.mov')) contentType = 'video/quicktime';
+        else if (fileName.toLowerCase().endsWith('.webm')) contentType = 'video/webm';
+
+        console.log(`   -> Uploading video to shared storage...`);
+        const { error: uploadError } = await supabase.storage
+            .from('blackboard-images')
+            .upload(storagePath, fileContent, { contentType, upsert: false });
+
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage
+            .from('blackboard-images')
+            .getPublicUrl(storagePath);
+
+        const contentUrl = publicUrlData.publicUrl;
+
+        // 2. Find ALL classes for this Group/Date
+        const { data: classes } = await supabase
+            .from('classes')
+            .select('id, student:profiles(full_name)')
+            .eq('title', className)
+            .eq('class_date', classDate);
+
+        if (!classes || classes.length === 0) {
+            console.log(`   -> [WARN] No classes found for ${className} on ${classDate}. Video uploaded but not linked. (Will link when students are added)`);
+            addToCache(filePath);
+            return;
+        }
+
+        console.log(`   -> Linking video to ${classes.length} students...`);
+
+        // 3. Link to each class
+        for (const cls of classes) {
+            // Check duplicate
+            const { count } = await supabase
+                .from('materials')
+                .select('*', { count: 'exact', head: true })
+                .eq('class_id', cls.id)
+                .eq('title', fileName);
+
+            if (count > 0) continue;
+
+            await supabase.from('materials').insert({
+                class_id: cls.id,
+                type: 'video_link', // Use video_link type for now
+                title: fileName,
+                content_url: contentUrl,
+                order_index: 100 // Videos at end
+            });
+            console.log(`      + Linked to ${cls.student.full_name}`);
+        }
+
+        console.log(`   -> [SUCCESS] Video processed.`);
+        addToCache(filePath);
+
+    } catch (err) {
+        console.error(`   -> [ERROR] Video processing failed: ${err.message}`);
+    }
+}
+
+// Process Student Image
+async function processImage(filePath, rootDir, fileName) {
+    const { className: folderName, classDate, relativePath, dateFolder } = parsePath(filePath, rootDir);
+    if (!folderName || !classDate) return;
 
     // Extract Name
-    // Pattern: "1_Name.png" or "Name.png" or "3_Name_hash.png"
-    // Let's take the first part after digits and underscore, or just the name
-    // Simplest robust: Remove leading digits and underscores, then take basename
-    let namePart = studentFile.replace(/^\d+[_ ]*/, '').replace(/\.[^/.]+$/, "");
-    // Remove any trailing hash or numbers if separated by underscore (optional, depends on user files)
-    // For "1_Sehyeon.png", namePart is "Sehyeon"
-    // For "Sehyeon.png", namePart is "Sehyeon"
-
-    // If name has underscores inside (e.g. Kim_Sehyeon), allow it.
+    let namePart = fileName.replace(/^\d+[_ ]*/, '').replace(/\.[^/.]+$/, "");
     let studentName = namePart.trim();
 
-    // Check for "___" separator in case of "2_008___82121652.png" (from image)
-    if (studentName.includes('___')) {
-        // Maybe ignore this file or try to parse? Use logic: "2_008" might be name?
-        // Let's assume user uses standard names mostly.
-        // If it looks like ID, skip or warn.
+    if (!studentName || studentName.length < 2) {
+        console.log(`[SKIP] Invalid student name in file: ${fileName}`);
+        return;
     }
-
-    if (!studentName) return;
-
-    // Check with Supabase (Is this file already uploaded?)
-    // Optimization: Check duplication globally for this class? 
-    // We do it per file for safety.
 
     try {
         // 1. Find Student
@@ -127,25 +223,49 @@ async function processFile(filePath, rootDir) {
             .limit(1);
 
         if (!profiles || profiles.length === 0) {
-            console.log(`[SKIP] Student '${studentName}' not found for file: ${studentFile}`);
+            console.log(`[SKIP] Student '${studentName}' not found in DB. File: ${fileName}`);
             return;
         }
         const student = profiles[0];
 
-        // 2. Find/Create Class
+        // 2. Determine Class Title (Group Logic)
+        let targetClassTitle = folderName; // Default to folder name
+
+        // Check if student belongs to any groups
+        const { data: groupMembers, error: groupError } = await supabase
+            .from('group_members')
+            .select('group:groups(name)')
+            .eq('student_id', student.id);
+
+        if (!groupError && groupMembers && groupMembers.length > 0) {
+            // Priority 1: If folder name matches one of their groups, use that.
+            const matchedGroup = groupMembers.find(gm => gm.group.name === folderName);
+            if (matchedGroup) {
+                targetClassTitle = matchedGroup.group.name;
+                console.log(`   -> matched group: ${targetClassTitle}`);
+            } else {
+                // Priority 2: If file is in a generic folder, but student is in a group, use the first group.
+                // Assuming 1 student usually belongs to 1 main class group for now.
+                // If they are in multiple, we might need more logic, but taking the first one is a safe "auto-sort" default.
+                targetClassTitle = groupMembers[0].group.name;
+                console.log(`   -> auto-sorted to group: ${targetClassTitle}`);
+            }
+        }
+
+        // 3. Find/Create Class Session
         let { data: classes } = await supabase
             .from('classes')
             .select('id')
             .eq('student_id', student.id)
             .eq('class_date', classDate)
-            .eq('title', className)
+            .eq('title', targetClassTitle)
             .limit(1);
 
         let classId;
         if (classes && classes.length > 0) {
             classId = classes[0].id;
         } else {
-            // Fetch admin
+            // Create New Class
             const { data: adminUsers } = await supabase.from('profiles').select('id').eq('role', 'admin').limit(1);
             const adminId = adminUsers && adminUsers[0] ? adminUsers[0].id : student.id;
 
@@ -153,7 +273,7 @@ async function processFile(filePath, rootDir) {
                 .from('classes')
                 .insert({
                     student_id: student.id,
-                    title: className,
+                    title: targetClassTitle,
                     description: `Auto-uploaded from folder: ${dateFolder}`,
                     class_date: classDate,
                     created_by: adminId
@@ -165,25 +285,24 @@ async function processFile(filePath, rootDir) {
             classId = newClass.id;
         }
 
-        // 3. Duplication Check (Crucial)
+        // 4. Image Duplication Check
         const { count: existingCount } = await supabase
             .from('materials')
             .select('*', { count: 'exact', head: true })
             .eq('class_id', classId)
-            .ilike('content_url', `%${studentFile}%`);
+            .eq('title', fileName);
 
         if (existingCount > 0) {
-            // Already uploaded
+            console.log(`[SKIP] Duplicate file already exists: ${fileName}`);
+            addToCache(filePath);
             return;
         }
 
-        console.log(`[UPLOADING] ${studentName} - ${classDate} : ${studentFile}`);
+        console.log(`[UPLOADING] ${studentName} -> [${targetClassTitle}] ${classDate} : ${fileName}`);
 
-        // 4. Upload
+        // 5. Upload Image
         const fileContent = fs.readFileSync(filePath);
-        // Use safe ASCII name for storage key: timestamp_random.ext
-        const ext = path.extname(studentFile);
-        const safeFileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+        const safeFileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}${path.extname(fileName)}`;
         const storagePath = `${student.id}/${classDate}/${safeFileName}`;
 
         const { error: uploadError } = await supabase.storage
@@ -201,6 +320,7 @@ async function processFile(filePath, rootDir) {
             .insert({
                 class_id: classId,
                 type: 'blackboard_image',
+                title: fileName,
                 content_url: publicUrlData.publicUrl,
                 order_index: 0
             });
@@ -208,9 +328,66 @@ async function processFile(filePath, rootDir) {
         if (materialError) throw materialError;
 
         console.log(`   -> [SUCCESS] Uploaded.`);
+        addToCache(filePath);
+
+        // 6. Catch-up: Check for Sibling Videos (using the SAME targetClassTitle)
+        await scanForSiblingVideos(classId, path.dirname(filePath), targetClassTitle, classDate);
 
     } catch (err) {
         console.error(`   -> [ERROR] ${err.message}`);
+    }
+}
+
+// Helper: Check for videos in the folder and link them if not already linked
+async function scanForSiblingVideos(classId, folderPath, className, classDate) {
+    try {
+        const files = fs.readdirSync(folderPath);
+        const videos = files.filter(f => isVideo(f));
+
+        for (const videoFile of videos) {
+            // Check if this class already has this video
+            const { count } = await supabase
+                .from('materials')
+                .select('*', { count: 'exact', head: true })
+                .eq('class_id', classId)
+                .eq('title', videoFile);
+
+            if (count > 0) continue; // Already linked
+
+            console.log(`   -> Found sibling video: ${videoFile}. Checking distribution...`);
+
+            // We need the URL of the ALREADY UPLOADED video.
+            // Search for ANY material with this title that is a video_link and has _shared path
+            const { data: existingMaterials } = await supabase
+                .from('materials')
+                .select('content_url')
+                .eq('title', videoFile)
+                .filter('content_url', 'ilike', '%_shared%') // Supabase ILIKE filter
+                .limit(1);
+
+            let contentUrl;
+            if (existingMaterials && existingMaterials.length > 0) {
+                contentUrl = existingMaterials[0].content_url;
+            } else {
+                // Not found? Trigger explicit upload for it
+                console.log(`      Video not on server yet. triggering upload...`);
+                await processVideo(path.join(folderPath, videoFile), folderPath, videoFile);
+                return; // processVideo handles linking
+            }
+
+            if (contentUrl) {
+                await supabase.from('materials').insert({
+                    class_id: classId,
+                    type: 'video_link',
+                    title: videoFile,
+                    content_url: contentUrl,
+                    order_index: 100
+                });
+                console.log(`      + Linked existing video to this class.`);
+            }
+        }
+    } catch (err) {
+        // console.log(`   -> [WARN] Error scanning siblings: ${err.message}`);
     }
 }
 
@@ -236,11 +413,10 @@ async function main() {
 
     if (!watchDir) {
         watchDir = await askQuestion("Enter the full path of the folder to watch: ");
-        watchDir = watchDir.trim().replace(/^["']|["']$/g, ''); // Remove quotes if user pasted path as string
+        watchDir = watchDir.trim().replace(/^["']|["']$/g, '');
 
         if (!fs.existsSync(watchDir)) {
             console.error("Error: Folder does not exist!");
-            // Wait a bit before exit so user sees message
             await new Promise(r => setTimeout(r, 3000));
             process.exit(1);
         }

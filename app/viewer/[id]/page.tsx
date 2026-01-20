@@ -230,8 +230,20 @@ export default function ViewerPage() {
     }
   }
 
-  const images = materials.filter(m => m.type === 'blackboard_image')
+  const studentImages = materials.filter(m => m.type === 'blackboard_image')
+  const teacherImages = materials.filter(m => m.type === 'teacher_blackboard_image')
   const videos = materials.filter(m => m.type === 'video_link')
+
+  const [boardMode, setBoardMode] = useState<'student' | 'teacher'>('student')
+
+  // Auto-switch to teacher mode if only teacher images exist
+  useEffect(() => {
+    if (studentImages.length === 0 && teacherImages.length > 0) {
+      setBoardMode('teacher')
+    }
+  }, [materials])
+
+  const images = boardMode === 'student' ? studentImages : teacherImages
 
   const onFlip = useCallback((e: any) => {
     setCurrentPage(e.data)
@@ -311,7 +323,7 @@ export default function ViewerPage() {
     )
   }
 
-  if (!classInfo || images.length === 0) {
+  if (!classInfo || (images.length === 0 && videos.length === 0)) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="text-center">
@@ -362,12 +374,37 @@ export default function ViewerPage() {
             <div>
               <h1 className="text-base sm:text-lg font-semibold flex items-center gap-2">
                 {classInfo.title}
+                {boardMode === 'teacher' && <span className="text-xs bg-amber-600 px-2 py-0.5 rounded text-white ml-2">선생님 판서</span>}
+                {boardMode === 'student' && teacherImages.length > 0 && <span className="text-xs bg-blue-600 px-2 py-0.5 rounded text-white ml-2">학생 판서</span>}
               </h1>
               <p className="text-xs sm:text-sm text-gray-300">{formatDate(classInfo.class_date)}</p>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
+            {(studentImages.length > 0 && teacherImages.length > 0) && (
+              <div className="flex bg-gray-700/50 rounded-lg p-1 mr-4 border border-gray-600">
+                <button
+                  onClick={() => setBoardMode('student')}
+                  className={`px-3 py-1 text-sm rounded-md transition-all ${boardMode === 'student'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-gray-300 hover:text-white'
+                    }`}
+                >
+                  학생 판서
+                </button>
+                <button
+                  onClick={() => setBoardMode('teacher')}
+                  className={`px-3 py-1 text-sm rounded-md transition-all ${boardMode === 'teacher'
+                    ? 'bg-amber-600 text-white shadow-sm'
+                    : 'text-gray-300 hover:text-white'
+                    }`}
+                >
+                  선생님 판서
+                </button>
+              </div>
+            )}
+
             <Button
               variant="ghost"
               size="sm"
@@ -404,7 +441,24 @@ export default function ViewerPage() {
       {/* Main Viewer */}
       <main className="flex-1 flex items-center justify-center p-4 overflow-hidden relative">
         <div className="relative w-full h-full flex items-center justify-center">
-          {viewMode === 'scroll' ? (
+          {images.length === 0 && videos.length > 0 ? (
+            <div className="text-center">
+              <div className="mb-6">
+                <Play className="h-20 w-20 text-red-600 mx-auto opacity-80" />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">동영상 강의</h2>
+              <p className="text-gray-400 mb-6">이 수업은 칠판 판서 없이 동영상으로만 구성되어 있습니다.</p>
+              <Button
+                size="lg"
+                onClick={() => window.open(videos[0].content_url, '_blank')}
+                className="bg-red-600 hover:bg-red-700 text-white text-lg px-8 py-6 h-auto"
+              >
+                <Play className="h-6 w-6 mr-3" />
+                {videos[0].title || '영상 재생하기'}
+                <ExternalLink className="h-5 w-5 ml-3" />
+              </Button>
+            </div>
+          ) : viewMode === 'scroll' ? (
             <div className="w-full h-full overflow-y-auto overflow-x-hidden p-4 space-y-4 flex flex-col items-center">
               {images.map((image, index) => (
                 <div id={`page-${index}`} key={image.id} className="max-w-3xl w-full">

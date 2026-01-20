@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { formatDate } from '@/lib/utils'
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { ArrowLeft, BookOpen, Trash2, Calendar as CalendarIcon, Search, Eye } from 'lucide-react'
+import { ArrowLeft, BookOpen, Trash2, Calendar as CalendarIcon, Search, Eye, Video, Users, ExternalLink } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 import { ClassEditDialog } from '@/components/admin/class-edit-dialog'
 
@@ -22,6 +22,7 @@ export default function StudentDetailView() {
     const [loading, setLoading] = useState(true)
     const [student, setStudent] = useState<any>(null)
     const [classes, setClasses] = useState<any[]>([])
+    const [enrolledGroups, setEnrolledGroups] = useState<any[]>([])
     const [selectedDate, setSelectedDate] = useState<Date | undefined>()
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedClass, setSelectedClass] = useState<string>('')
@@ -46,6 +47,7 @@ export default function StudentDetailView() {
             }
             setStudent(result.student)
             setClasses(result.classes || [])
+            setEnrolledGroups(result.enrolledGroups || [])
         } catch (error) {
             console.error(error)
         } finally {
@@ -150,70 +152,110 @@ export default function StudentDetailView() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Left: Filters */}
-                <Card className="lg:col-span-1 h-fit sticky top-6">
-                    <CardHeader>
-                        <CardTitle className="text-lg flex items-center">
-                            <CalendarIcon className="h-5 w-5 mr-2" />
-                            날짜별 보기
-                        </CardTitle>
-                        <CardDescription>
-                            날짜를 선택하여 {student.full_name} 학생의 자료를 확인하세요.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="relative">
-                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input
-                                placeholder="수업 제목 검색..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className="pl-9"
-                            />
-                        </div>
-
-                        {/* Class Filter (반 필터) */}
-                        {uniqueClassTitles.length > 1 && (
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-muted-foreground">반 필터</label>
-                                <select
-                                    value={selectedClass}
-                                    onChange={(e) => setSelectedClass(e.target.value)}
-                                    className="w-full p-2 border rounded-md bg-white text-sm"
-                                >
-                                    <option value="">모든 반</option>
-                                    {uniqueClassTitles.map(title => (
-                                        <option key={title} value={title}>{title}</option>
+                {/* Left: Filters and Info */}
+                <div className="lg:col-span-1 space-y-6 sticky top-6 h-fit">
+                    {/* Enrolled Groups Card */}
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <CardTitle className="text-lg flex items-center">
+                                <Users className="h-5 w-5 mr-2" />
+                                수강 중인 반
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {enrolledGroups.length > 0 ? (
+                                <div className="space-y-2">
+                                    {enrolledGroups.map((group) => (
+                                        <div key={group.id} className="flex items-center justify-between p-2 rounded-md bg-secondary/50 border group hover:border-primary/50 transition-colors">
+                                            <div className="min-w-0 flex-1 mr-2">
+                                                <div className="font-medium text-sm truncate">{group.name}</div>
+                                                <div className="text-xs text-muted-foreground truncate">{group.description || '설명 없음'}</div>
+                                            </div>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                onClick={() => router.push(`/admin/groups/${group.id}`)}
+                                                title="반 관리로 이동"
+                                            >
+                                                <ExternalLink className="h-4 w-4" />
+                                            </Button>
+                                        </div>
                                     ))}
-                                </select>
+                                </div>
+                            ) : (
+                                <p className="text-sm text-muted-foreground text-center py-4 border-2 border-dashed rounded-lg">
+                                    배정된 반이 없습니다.
+                                </p>
+                            )}
+                        </CardContent>
+                    </Card>
+
+                    {/* Date Filter Card */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-lg flex items-center">
+                                <CalendarIcon className="h-5 w-5 mr-2" />
+                                날짜별 보기
+                            </CardTitle>
+                            <CardDescription>
+                                날짜를 선택하여 {student.full_name} 학생의 자료를 확인하세요.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    placeholder="수업 제목 검색..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="pl-9"
+                                />
                             </div>
-                        )}
 
-                        <div className="flex justify-center border rounded-md p-4">
-                            <Calendar
-                                mode="single"
-                                selected={selectedDate}
-                                onSelect={setSelectedDate}
-                                modifiers={{ hasClass: (date) => classDates.has(format(date, 'yyyy-MM-dd')) }}
-                                modifiersClassNames={{ hasClass: 'has-class-day' }}
-                                locale={ko}
-                            />
-                        </div>
+                            {/* Class Filter (반 필터) */}
+                            {uniqueClassTitles.length > 1 && (
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-muted-foreground">반 필터</label>
+                                    <select
+                                        value={selectedClass}
+                                        onChange={(e) => setSelectedClass(e.target.value)}
+                                        className="w-full p-2 border rounded-md bg-white text-sm"
+                                    >
+                                        <option value="">모든 반</option>
+                                        {uniqueClassTitles.map(title => (
+                                            <option key={title} value={title}>{title}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
 
-                        {(selectedDate || selectedClass) && (
-                            <Button
-                                variant="outline"
-                                className="w-full"
-                                onClick={() => {
-                                    setSelectedDate(undefined)
-                                    setSelectedClass('')
-                                }}
-                            >
-                                필터 초기화
-                            </Button>
-                        )}
-                    </CardContent>
-                </Card>
+                            <div className="flex justify-center border rounded-md p-4">
+                                <Calendar
+                                    mode="single"
+                                    selected={selectedDate}
+                                    onSelect={setSelectedDate}
+                                    modifiers={{ hasClass: (date) => classDates.has(format(date, 'yyyy-MM-dd')) }}
+                                    modifiersClassNames={{ hasClass: 'has-class-day' }}
+                                    locale={ko}
+                                />
+                            </div>
+
+                            {(selectedDate || selectedClass) && (
+                                <Button
+                                    variant="outline"
+                                    className="w-full"
+                                    onClick={() => {
+                                        setSelectedDate(undefined)
+                                        setSelectedClass('')
+                                    }}
+                                >
+                                    필터 초기화
+                                </Button>
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
 
                 {/* Right: Timeline */}
                 <div className="lg:col-span-2 space-y-6">
@@ -258,10 +300,20 @@ export default function StudentDetailView() {
                                                             </div>
 
                                                             <div className="flex items-center gap-4 text-sm text-muted-foreground mt-2">
-                                                                <span className="flex items-center bg-gray-100 px-2 py-1 rounded">
-                                                                    <BookOpen className="h-3 w-3 mr-1" />
-                                                                    자료 {(cls.materials?.some((m: any) => m.type === 'blackboard_image') ? 1 : 0) + (cls.materials?.filter((m: any) => m.type === 'video_link').length || 0)}개
-                                                                </span>
+                                                                <div className="flex gap-2">
+                                                                    {cls.materials?.some((m: any) => m.type === 'blackboard_image') && (
+                                                                        <span className="flex items-center bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                                                                            <BookOpen className="h-3 w-3 mr-1" />
+                                                                            판서
+                                                                        </span>
+                                                                    )}
+                                                                    {cls.materials?.some((m: any) => m.type === 'video_link') && (
+                                                                        <span className="flex items-center bg-red-100 text-red-700 px-2 py-1 rounded">
+                                                                            <Video className="h-3 w-3 mr-1" />
+                                                                            영상
+                                                                        </span>
+                                                                    )}
+                                                                </div>
                                                                 <span className="text-xs text-gray-400">
                                                                     {format(parseISO(cls.created_at), 'HH:mm')} 업로드됨
                                                                 </span>

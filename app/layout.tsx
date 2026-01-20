@@ -8,12 +8,13 @@ export const metadata: Metadata = {
   title: "ClassIn 학습 아카이브",
   description: "온라인 수업 복습 플랫폼",
   manifest: "/manifest.json",
+}
+
+export const viewport = {
   themeColor: "#3b82f6",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-  },
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
 }
 
 export default function RootLayout({

@@ -38,9 +38,14 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  Users,
+  User,
+  GraduationCap
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import Image from 'next/image'
+import { createClass, createClassForGroup, createMaterials, uploadImage } from '@/app/actions/class'
+import { getGroups } from '@/app/actions/group'
 
 interface UploadedImage {
   id: string
@@ -56,6 +61,7 @@ interface FormData {
   classDate: string
   videoUrl: string
   videoTitle: string
+  teacherName: string
 }
 
 // Sortable Image Item Component
@@ -120,18 +126,28 @@ export default function NewClassPage() {
   const preselectedStudent = searchParams.get('student')
   const { toast } = useToast()
 
+  const [mode, setMode] = useState<'student' | 'group'>('student')
+
   const [students, setStudents] = useState<Profile[]>([])
+  const [groups, setGroups] = useState<any[]>([])
+
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedStudent, setSelectedStudent] = useState<Profile | null>(null)
+  const [selectedGroup, setSelectedGroup] = useState<any>(null)
+
   const [images, setImages] = useState<UploadedImage[]>([])
   const [uploading, setUploading] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewIndex, setPreviewIndex] = useState(0)
 
-  const { register, handleSubmit, watch, setValue } = useForm<FormData>({
+
+  // ... existing code ...
+
+  const { register, handleSubmit, watch, setValue, reset } = useForm<FormData>({
     defaultValues: {
       classDate: new Date().toISOString().split('T')[0],
       title: `${new Date().toLocaleDateString('ko-KR')} 수업`,
+      teacherName: '',
     },
   })
 
@@ -144,12 +160,14 @@ export default function NewClassPage() {
 
   useEffect(() => {
     loadStudents()
+    loadGroups()
   }, [])
 
   useEffect(() => {
     if (preselectedStudent && students.length > 0) {
       const student = students.find(s => s.id === preselectedStudent)
       if (student) {
+        setMode('student')
         setSelectedStudent(student)
         setValue('studentId', student.id)
       }
@@ -172,11 +190,15 @@ export default function NewClassPage() {
       setStudents(students)
     } catch (error) {
       console.error('Failed to load students', error)
-      toast({
-        title: "학생 목록 로드 실패",
-        description: "학생 목록을 불러오지 못했습니다.",
-        variant: "destructive"
-      })
+    }
+  }
+
+  const loadGroups = async () => {
+    try {
+      const { groups } = await getGroups()
+      setGroups(groups || [])
+    } catch (error) {
+      console.error('Failed to load groups', error)
     }
   }
 
@@ -221,19 +243,23 @@ export default function NewClassPage() {
   }
 
   const onSubmit = async (data: FormData) => {
-    if (!selectedStudent) {
-      toast({
-        title: "학생을 선택하세요",
-        description: "수업을 등록할 학생을 먼저 선택해주세요.",
-        variant: "destructive",
-      })
+    // Validation
+    if (mode === 'student' && !selectedStudent) {
+      toast({ title: "학생을 선택하세요", variant: "destructive" })
+      return
+    }
+    if (mode === 'group' && !selectedGroup) {
+      toast({ title: "반을 선택하세요", variant: "destructive" })
       return
     }
 
-    if (images.length === 0) {
+    const hasImages = images.length > 0
+    const hasVideo = !!data.videoUrl
+
+    if (!hasImages && !hasVideo) {
       toast({
-        title: "이미지를 업로드하세요",
-        description: "최소 1개 이상의 칠판 이미지를 업로드해주세요.",
+        title: "자료를 입력하세요",
+        description: "칠판 이미지 또는 동영상 링크 중 하나 이상을 입력해야 합니다.",
         variant: "destructive",
       })
       return
@@ -245,61 +271,110 @@ export default function NewClassPage() {
       const user = await getCurrentUser()
       if (!user) throw new Error('Not authenticated')
 
-      // Create class
-      const { data: classData, error: classError } = await supabase
-        .from('classes')
-        .insert({
-          student_id: selectedStudent.id,
-          title: data.title,
-          description: data.description,
-          class_date: data.classDate,
-          created_by: user.id,
-        })
-        .select()
-        .single()
+      // 1. Upload Images First (Once)
+      // For Group mode, we could upload once and share URL, but standard logic uses studentId in path.
+      // To satisfy existing logic (student folder structure), if in group mode, maybe upload to a generic 'group' folder or just pick the first student?
+      // Actually, if we use `createClass`, the materials table stores the public URL.
+      // The `folder-monitor` uses strict paths.
+      // But manual upload can be flexible.
+      // Let's stick to:
+      // - Student Mode: `studentId/date/filename`
+      // - Group Mode: `group/groupId/date/filename` (Clean separation)
 
-      if (classError) throw classError
+      const bucketPath = mode === 'student'
+        ? `${selectedStudent?.id}/${data.classDate}`
+        : `group/${selectedGroup?.id}/${data.classDate}`
 
-      // Upload images
-      for (const image of images) {
-        const fileName = `${selectedStudent.id}/${data.classDate}/${Date.now()}-${image.file.name}`
-        const { error: uploadError } = await supabase.storage
-          .from('blackboard-images')
-          .upload(fileName, image.file)
+      const uploadedMaterials: any[] = []
 
-        if (uploadError) throw uploadError
+      for (const [index, image] of images.entries()) {
+        // Sanitize filename: replace non-ASCII characters with underscore, keep extension
+        const extension = image.file.name.split('.').pop() || 'png'
+        const baseName = image.file.name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "_")
+        const safeFileName = baseName.length > 0 ? baseName : `image-${index}`
+        const fileName = `${bucketPath}/${Date.now()}-${safeFileName}.${extension}` // Timestamp ensures uniqueness
 
-        const { data: urlData } = supabase.storage
-          .from('blackboard-images')
-          .getPublicUrl(fileName)
+        // Use Server Action for upload to bypass RLS
+        const formData = new FormData()
+        formData.append('file', image.file)
+        formData.append('path', fileName)
 
-        await supabase.from('materials').insert({
-          class_id: classData.id,
-          type: 'blackboard_image',
-          content_url: urlData.publicUrl,
+        const { url, error: uploadError } = await uploadImage(formData)
+
+        if (uploadError) throw new Error(uploadError)
+
+        const isTeacherMaterial = data.teacherName && image.file.name.includes(data.teacherName)
+
+        uploadedMaterials.push({
+          type: isTeacherMaterial ? 'teacher_blackboard_image' : 'blackboard_image',
+          content_url: url,
           order_index: image.order,
         })
       }
 
-      // Add video link if provided
+      // Add Video
       if (data.videoUrl) {
-        await supabase.from('materials').insert({
-          class_id: classData.id,
+        uploadedMaterials.push({
           type: 'video_link',
           content_url: data.videoUrl,
           title: data.videoTitle || '수업 영상',
-          order_index: images.length,
+          // Video comes after all images
+          order_index: images.length
         })
       }
 
-      toast({
-        title: "업로드 완료! 🎉",
-        description: `${selectedStudent.full_name}의 수업이 성공적으로 등록되었습니다.`,
-      })
+      // 2. Create Classes
+      if (mode === 'student') {
+        // Single Student
+        const { class: newClass, error } = await createClass({
+          student_id: selectedStudent!.id,
+          title: data.title,
+          description: data.description,
+          class_date: data.classDate,
+        })
+        if (error) throw new Error(error)
+
+        // Insert Materials (Server Action)
+        const materialsToInsert = uploadedMaterials.map(m => ({ ...m, class_id: newClass.id }))
+        const { error: matError } = await createMaterials(materialsToInsert)
+        if (matError) throw new Error(matError)
+
+        toast({ title: "업로드 완료! 🎉", description: `${selectedStudent!.full_name}의 수업 등록 완료.` })
+
+      } else {
+        // Group Mode
+        // First, create classes for all students in group
+        const { classes, error } = await createClassForGroup(selectedGroup!.id, {
+          title: data.title,
+          description: data.description,
+          class_date: data.classDate
+        })
+
+        if (error) throw new Error(error)
+
+        // Now Insert Materials for EACH class created
+        const materialInserts = []
+        const createdClasses = classes || []
+        for (const cls of createdClasses) {
+          for (const m of uploadedMaterials) {
+            materialInserts.push({ ...m, class_id: cls.id })
+          }
+        }
+
+        // Batch insert materials (Server Action)
+        if (materialInserts.length > 0) {
+          const { error: matError } = await createMaterials(materialInserts)
+          if (matError) throw new Error(matError)
+        }
+
+        toast({ title: "반 일괄 업로드 완료! 🎉", description: `${selectedGroup!.name} (${createdClasses.length}명) 수업 등록 완료.` })
+      }
+
 
       // Reset form
       setImages([])
       setSelectedStudent(null)
+      setSelectedGroup(null) // Reset group too
       setValue('title', `${new Date().toLocaleDateString('ko-KR')} 수업`)
       setValue('description', '')
       setValue('videoUrl', '')
@@ -321,21 +396,55 @@ export default function NewClassPage() {
     }
   }
 
+  // Filter Logic
   const filteredStudents = students.filter(s =>
     s.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.email.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  const filteredGroups = groups.filter(g =>
+    g.name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const hasContent = images.length > 0 || !!watch('videoUrl')
+
   return (
     <div className="flex h-[calc(100vh-88px)] gap-6">
-      {/* Left Sidebar - Student Selector */}
+      {/* Left Sidebar - Selector */}
       <Card className="w-80 flex flex-col">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">학생 선택</CardTitle>
+        <CardHeader className="pb-3 space-y-3">
+          <CardTitle className="text-lg">대상 선택</CardTitle>
+
+          {/* Mode Toggle */}
+          <div className="flex p-1 bg-muted rounded-lg">
+            <button
+              type="button"
+              onClick={() => { setMode('student'); setSearchQuery(''); }}
+              className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${mode === 'student' ? 'bg-white shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'
+                }`}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <User className="h-4 w-4" />
+                학생
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('group'); setSearchQuery(''); }}
+              className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-all ${mode === 'group' ? 'bg-white shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'
+                }`}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <Users className="h-4 w-4" />
+                반(그룹)
+              </div>
+            </button>
+          </div>
+
           <div className="relative mt-2">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
-              placeholder="학생 검색..."
+              placeholder={mode === 'student' ? "학생 검색..." : "반 검색..."}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"
@@ -344,26 +453,57 @@ export default function NewClassPage() {
         </CardHeader>
         <CardContent className="flex-1 overflow-y-auto p-2">
           <div className="space-y-1">
-            {filteredStudents.map((student) => (
-              <button
-                key={student.id}
-                type="button"
-                onClick={() => {
-                  setSelectedStudent(student)
-                  setValue('studentId', student.id)
-                }}
-                className={`w-full text-left p-3 rounded-lg transition-colors ${selectedStudent?.id === student.id
-                  ? 'bg-primary text-primary-foreground'
-                  : 'hover:bg-gray-100'
-                  }`}
-              >
-                <div className="font-medium">{student.full_name}</div>
-                <div className={`text-xs ${selectedStudent?.id === student.id ? 'text-primary-foreground/80' : 'text-muted-foreground'
-                  }`}>
-                  {student.email}
-                </div>
-              </button>
-            ))}
+            {mode === 'student' ? (
+              // Student List
+              filteredStudents.map((student) => (
+                <button
+                  key={student.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedStudent(student)
+                    setValue('studentId', student.id)
+                  }}
+                  className={`w-full text-left p-3 rounded-lg transition-colors ${selectedStudent?.id === student.id
+                    ? 'bg-primary text-primary-foreground'
+                    : 'hover:bg-gray-100'
+                    }`}
+                >
+                  <div className="font-medium">{student.full_name}</div>
+                  <div className={`text-xs ${selectedStudent?.id === student.id ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                    {student.email}
+                  </div>
+                </button>
+              ))
+            ) : (
+              // Group List
+              filteredGroups.map((group) => (
+                <button
+                  key={group.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedGroup(group)
+                    // Auto-fill teacher name if assigned
+                    // teacher can be an object or array depending on Supabase response structure, usually object for Many-to-One
+                    const teacher = Array.isArray(group.teacher) ? group.teacher[0] : group.teacher
+                    if (teacher?.name) {
+                      setValue('teacherName', teacher.name)
+                      toast({ title: "담임 선생님 자동 선택", description: `${teacher.name} 선생님이 자동으로 입력되었습니다.` })
+                    } else {
+                      setValue('teacherName', '') // Reset if no teacher
+                    }
+                  }}
+                  className={`w-full text-left p-3 rounded-lg transition-colors ${selectedGroup?.id === group.id
+                    ? 'bg-primary text-primary-foreground'
+                    : 'hover:bg-gray-100'
+                    }`}
+                >
+                  <div className="font-medium">{group.name}</div>
+                  <div className={`text-xs ${selectedGroup?.id === group.id ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                    학생 {group.members?.[0]?.count || 0}명
+                  </div>
+                </button>
+              ))
+            )}
           </div>
         </CardContent>
       </Card>
@@ -375,9 +515,14 @@ export default function NewClassPage() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-2xl font-bold">수업 자료 업로드</h2>
-              {selectedStudent && (
+              {mode === 'student' && selectedStudent && (
                 <p className="text-muted-foreground mt-1">
-                  {selectedStudent.full_name}의 수업을 등록합니다
+                  <span className="font-bold text-primary">{selectedStudent.full_name}</span> 학생에게 업로드합니다.
+                </p>
+              )}
+              {mode === 'group' && selectedGroup && (
+                <p className="text-muted-foreground mt-1">
+                  <span className="font-bold text-primary">{selectedGroup.name}</span> 소속 학생 전원에게 업로드합니다.
                 </p>
               )}
             </div>
@@ -409,6 +554,22 @@ export default function NewClassPage() {
                   <label className="text-sm font-medium">수업 제목</label>
                   <Input {...register('title')} required />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center">
+                  <GraduationCap className="h-4 w-4 mr-2" />
+                  선생님 성함 (선택)
+                </label>
+                <div className="flex gap-2">
+                  <Input
+                    {...register('teacherName')}
+                    placeholder="파일명에 이 이름이 포함되면 선생님 판서로 자동 분류됩니다."
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  예: '홍길동' 입력 시, '홍길동_판서1.png'는 선생님 자료로 등록됩니다.
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -531,7 +692,7 @@ export default function NewClassPage() {
             <Button
               type="submit"
               size="lg"
-              disabled={uploading || !selectedStudent || images.length === 0}
+              disabled={uploading || (mode === 'student' && !selectedStudent) || (mode === 'group' && !selectedGroup) || !hasContent}
               className="min-w-[200px]"
             >
               {uploading ? (
@@ -542,7 +703,7 @@ export default function NewClassPage() {
               ) : (
                 <>
                   <Upload className="h-4 w-4 mr-2" />
-                  발행하기
+                  {mode === 'group' ? '일괄 발행하기' : '발행하기'}
                 </>
               )}
             </Button>
