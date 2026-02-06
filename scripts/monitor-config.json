@@ -1,3 +1,13 @@
 {
-  "watchDir": "D:\\801호 클래스인 판서자료"
+  "watchDirs": [
+    "D:\\OneDrive\\Documents\\과사람 의대관\\학습보고서 학생 칠판 파일",
+    "D:\\OneDrive\\M1",
+    "D:\\OneDrive\\M2",
+    "D:\\OneDrive\\M3",
+    "D:\\OneDrive\\M4",
+    "D:\\OneDrive\\M5",
+    "D:\\OneDrive\\M6",
+    "D:\\OneDrive\\M7",
+    "D:\\OneDrive\\M8"
+  ]
 }

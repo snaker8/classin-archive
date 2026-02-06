@@ -7,7 +7,7 @@ set "BaseDir=%~dp0"
 :: Remove trailing backslash if present
 if "%BaseDir:~-1%"=="\" set "BaseDir=%BaseDir:~0,-1%"
 
-set "SrcFile=%BaseDir%\Run-Folder-Monitor.bat"
+set "SrcFile=%BaseDir%\scripts\start-silent.vbs"
 set "StartupDir=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 set "ShortcutName=ClassIn-Folder-Monitor.lnk"
 
@@ -16,7 +16,7 @@ echo Source: %SrcFile%
 echo Target: %StartupDir%
 
 :: Create Shortcut using PowerShell with dynamic paths
-powershell "$s=(New-Object -COM WScript.Shell).CreateShortcut('%StartupDir%\%ShortcutName%');$s.TargetPath='%SrcFile%';$s.WorkingDirectory='%BaseDir%';$s.WindowStyle=7;$s.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%StartupDir%\%ShortcutName%');$s.TargetPath='%SrcFile%';$s.WorkingDirectory='%BaseDir%';$s.WindowStyle=7;$s.Save()"
 
 if %errorlevel% equ 0 (
     echo.

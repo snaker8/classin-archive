@@ -76,38 +76,102 @@ function isImage(fileName) {
     return fileName.match(/\.(png|jpg|jpeg|gif|webp)$/i);
 }
 
+// --- Helper Functions ---
+
+function normalizeCombinedPath(filePath) {
+    // Standardize path separators
+    return filePath.split(__dirname).join('').split(path.sep).join('/');
+}
+
+function parseDateFromFolder(folderName) {
+    // Formats: 2025-12-30, 26-1-27, 2025.12.30, 25.12.30
+    // Try regexes
+    let year, month, day;
+
+    // 1. YYYY-MM-DD or YY-M-D
+    let match = folderName.match(/^(\d{2,4})-(\d{1,2})-(\d{1,2})/);
+    if (match) {
+        year = parseInt(match[1]);
+        month = parseInt(match[2]);
+        day = parseInt(match[3]);
+    } else {
+        // 2. YYYY.MM.DD or YY.M.D
+        match = folderName.match(/^(\d{2,4})\.(\d{1,2})\.(\d{1,2})/);
+        if (match) {
+            year = parseInt(match[1]);
+            month = parseInt(match[2]);
+            day = parseInt(match[3]);
+        }
+    }
+
+    if (year && month && day) {
+        // Normalize Year (2-digit -> 20xx)
+        if (year < 100) year += 2000;
+        // Padding
+        const MM = month.toString().padStart(2, '0');
+        const DD = day.toString().padStart(2, '0');
+        return `${year}-${MM}-${DD}`;
+    }
+    return null;
+}
+
+function extractStudentName(fileName) {
+    // ClassIn format: "2_김경민.png" -> "김경민"
+    // Also handle "김경민.png"
+    // Remove extension
+    let name = fileName.replace(/\.[^/.]+$/, "");
+    // Remove leading digits and underscores/spaces
+    name = name.replace(/^[\d\s_]+/, '').trim();
+    return name;
+}
+
 function parsePath(filePath, rootDir) {
     const relativePath = path.relative(rootDir, filePath);
     const parts = relativePath.split(path.sep);
 
-    if (parts.length < 3) {
-        // console.log(`[SKIP] Path too short: ${relativePath}`);
-        return {};
-    }
+    if (parts.length < 2) return {}; // Need at least folder/file
 
-    const className = parts[0];
-    const dateFolder = parts[1];
+    // Walk up from file to find Date Folder
+    let classDate = null;
+    let dateFolderIndex = -1;
+    let dateFolderName = '';
 
-    // Date parsing
-    const dateMatch = dateFolder.match(/(\d{4}-\d{2}-\d{2})/);
-    let classDate = dateMatch ? dateMatch[1] : null;
-
-    // Backup date parsing from all parts if folder name isn't strict date
-    if (!classDate) {
-        for (const part of parts) {
-            const match = part.match(/(\d{4})-?(\d{2})-?(\d{2})/);
-            if (match) {
-                classDate = `${match[1]}-${match[2]}-${match[3]}`;
-                break;
-            }
+    // Look at parent folders (excluding file itself)
+    for (let i = parts.length - 2; i >= 0; i--) {
+        const folder = parts[i];
+        const parsed = parseDateFromFolder(folder);
+        if (parsed) {
+            classDate = parsed;
+            dateFolderIndex = i;
+            dateFolderName = folder;
+            break;
         }
     }
 
     if (!classDate) {
-        classDate = new Date().toISOString().split('T')[0];
+        // Fallback: Use today
+        // classDate = new Date().toISOString().split('T')[0];
+        // Don't default to today, strictly require date folder for now to avoid mess?
+        // Actually, for "Automatic", better safe than sorry.
+        // But if folder is "Concepts", it's not a date.
+        return { relativePath, parts, classDate: null };
     }
 
-    return { className, classDate, relativePath, dateFolder, parts };
+    // Determine Class Name
+    // Strategy: The folder IMMEDIATELY ABOVE the Date Folder is usually the Category or Class.
+    // However, sometimes it's "Class/Category/Date".
+    // We'll take the folder *above* the date folder as the primary candidate.
+    // If Date folder is at root of watch dir, then we have no class name context?
+    let className = '';
+
+    if (dateFolderIndex > 0) {
+        className = parts[dateFolderIndex - 1];
+    } else {
+        // Date folder is root. Use a default or try to rely on group matching later.
+        className = 'Uncategorized';
+    }
+
+    return { className, classDate, relativePath, dateFolder: dateFolderName, parts };
 }
 
 // MAIN DISPATCHER
@@ -126,14 +190,21 @@ async function processFile(filePath, rootDir) {
 
 // Process Video (Shared Class Material)
 async function processVideo(filePath, rootDir, fileName) {
-    const { className, classDate, relativePath } = parsePath(filePath, rootDir);
+    const { className, classDate, relativePath, parts } = parsePath(filePath, rootDir);
     if (!className || !classDate) return;
 
-    console.log(`[VIDEO DETECTED] ${className} - ${classDate} : ${fileName}`);
+    console.log(`[VIDEO DETECTED] Path: ${relativePath} | Date: ${classDate}`);
 
     try {
         // 1. Upload to Shared Storage (if not exists)
         const safeFileName = `${Date.now()}_${fileName}`;
+        // Note: storagePath still uses the raw folder structure (M1/Class/...) 
+        // which is fine, as long as we LINK it to the right class.
+        // Actually, let's keep storage organization clean if possible, but raw path is safer for uniqueness.
+        // Let's stick to using 'className' (first part) for storage folder to keep it somewhat organized, 
+        // or we could use the full relative dir. Let's use parts[0] + parts[1]... actually parsePath already gives strict struct.
+        // Let's just use what we have.
+
         const storagePath = `_shared/${className}/${classDate}/${safeFileName}`;
         const fileContent = fs.readFileSync(filePath);
 
@@ -156,11 +227,15 @@ async function processVideo(filePath, rootDir, fileName) {
         const contentUrl = publicUrlData.publicUrl;
 
         // 2. Find ALL classes for this Group/Date
+        // IMPROVED: Check all path parts for a matching Class Title
+        // Since we don't know the exact class name, we query classes on this date 
+        // that have a title matching ANY of our path parts.
+
         const { data: classes } = await supabase
             .from('classes')
-            .select('id, student:profiles(full_name)')
-            .eq('title', className)
-            .eq('class_date', classDate);
+            .select('id, title, student:profiles!classes_student_id_fkey(full_name)')
+            .eq('class_date', classDate)
+            .in('title', parts); // Check if title is IN [M1, MyClass, SubType...]
 
         if (!classes || classes.length === 0) {
             console.log(`   -> [WARN] No classes found for ${className} on ${classDate}. Video uploaded but not linked. (Will link when students are added)`);
@@ -198,15 +273,109 @@ async function processVideo(filePath, rootDir, fileName) {
         console.error(`   -> [ERROR] Video processing failed: ${err.message}`);
     }
 }
+// -----------------------
+
+async function processTeacherImage(filePath, rootDir, fileName) {
+    const { className, classDate, relativePath, parts } = parsePath(filePath, rootDir);
+    if (!className || !classDate) return;
+
+    // Remove number prefix for logging
+    // Remove number prefix for logging
+    let namePart = extractStudentName(fileName);
+
+    console.log(`[TEACHER IMAGE DETECTED] Name: ${namePart} | Path: ${relativePath}`);
+
+    try {
+        // 1. Upload to Shared Storage (if not exists)
+        const safeFileName = `${Date.now()}_${fileName}`;
+        // Verify if we should use a specific 'teachers' folder or just shared
+        const storagePath = `_shared/teachers/${className}/${classDate}/${safeFileName}`;
+        const fileContent = fs.readFileSync(filePath);
+
+        console.log(`   -> Uploading teacher board to shared storage...`);
+        const { error: uploadError } = await supabase.storage
+            .from('blackboard-images')
+            .upload(storagePath, fileContent, { contentType: 'image/png', upsert: false });
+
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage
+            .from('blackboard-images')
+            .getPublicUrl(storagePath);
+
+        const contentUrl = publicUrlData.publicUrl;
+
+        // NEW: Record in Teacher Board Master Gallery
+        const teacherData = await findTeacher(namePart);
+        const { error: masterError } = await supabase
+            .from('teacher_board_master')
+            .insert({
+                content_url: contentUrl,
+                class_date: classDate,
+                teacher_id: teacherData ? teacherData.id : null,
+                filename: fileName
+            });
+
+        if (masterError && !masterError.message.includes('unique_violation')) {
+            console.warn(`   -> [WARN] Failed to record in master gallery: ${masterError.message}`);
+        }
+
+        // 2. Find ALL classes for this Group/Date
+        const { data: classes } = await supabase
+            .from('classes')
+            .select('id, title, student:profiles!classes_student_id_fkey(full_name)')
+            .eq('class_date', classDate)
+            .in('title', parts);
+
+        if (!classes || classes.length === 0) {
+            console.log(`   -> [INFO] No matching classes found yet. Board is safe in Gallery for manual distribution.`);
+            addToCache(filePath);
+            return;
+        }
+
+        console.log(`   -> Linking teacher board to ${classes.length} existing classes...`);
+
+        // 3. Link to each class
+        for (const cls of classes) {
+            // Check duplicate
+            const { count } = await supabase
+                .from('materials')
+                .select('*', { count: 'exact', head: true })
+                .eq('class_id', cls.id)
+                .eq('title', fileName);
+
+            if (count > 0) continue;
+
+            const orderMatch = fileName.match(/^(\d+)/);
+            const orderIndex = orderMatch ? parseInt(orderMatch[1]) : 0;
+
+            await supabase.from('materials').insert({
+                class_id: cls.id,
+                type: 'teacher_blackboard_image',
+                title: fileName,
+                content_url: contentUrl,
+                order_index: orderIndex
+            });
+            console.log(`      + Linked to ${cls.student.full_name}`);
+        }
+
+        console.log(`   -> [SUCCESS] Teacher board processed.`);
+        addToCache(filePath);
+
+    } catch (err) {
+        console.error(`   -> [ERROR] Teacher board processing failed: ${err.message}`);
+    }
+}
+
 
 // Process Student Image
 async function processImage(filePath, rootDir, fileName) {
-    const { className: folderName, classDate, relativePath, dateFolder } = parsePath(filePath, rootDir);
+    const { className: folderName, classDate, relativePath, dateFolder, parts } = parsePath(filePath, rootDir);
     if (!folderName || !classDate) return;
 
     // Extract Name
-    let namePart = fileName.replace(/^\d+[_ ]*/, '').replace(/\.[^/.]+$/, "");
-    let studentName = namePart.trim();
+    // Extract Name
+    let studentName = extractStudentName(fileName);
 
     if (!studentName || studentName.length < 2) {
         console.log(`[SKIP] Invalid student name in file: ${fileName}`);
@@ -223,32 +392,67 @@ async function processImage(filePath, rootDir, fileName) {
             .limit(1);
 
         if (!profiles || profiles.length === 0) {
+            // Check if it is a TEACHER
+            const teacherData = await findTeacher(studentName);
+            if (teacherData) {
+                await processTeacherImage(filePath, rootDir, fileName);
+                return;
+            }
+
             console.log(`[SKIP] Student '${studentName}' not found in DB. File: ${fileName}`);
             return;
         }
         const student = profiles[0];
 
         // 2. Determine Class Title (Group Logic)
-        let targetClassTitle = folderName; // Default to folder name
+        // 2. Determine Class Title (Improved Logic)
+        // Goal: Use the deepest non-date folder as the Class Title (Topic).
+        // Only if THAT specific folder matches a group name, use the normalized Group Name.
+        // Do NOT let a parent folder override the specific topic folder.
 
-        // Check if student belongs to any groups
+        let candidateTitle = folderName; // Default to root folder
+
+        // Parts includes filename at the end, so we ignore the last one.
+        // We scan from deepest folder (length-2) up to root (0).
+        for (let i = parts.length - 2; i >= 0; i--) {
+            const part = parts[i];
+            // Check if part looks like a date (YYYY-MM-DD or YYYY-MM-DD-...)
+            // Simple check: starts with 4 digits and looks date-ish
+            const isDateLike = part.match(/^\d{4}-\d{2}-\d{2}/);
+
+            if (!isDateLike) {
+                candidateTitle = part;
+                break; // Found our topic!
+            }
+        }
+
+        let targetClassTitle = candidateTitle;
+        let assignedTeacherName = null;
+
+        // Check if our Candidate Title matches a group
         const { data: groupMembers, error: groupError } = await supabase
             .from('group_members')
-            .select('group:groups(name)')
+            .select('group:groups(name, teacher:teachers(name))')
             .eq('student_id', student.id);
 
         if (!groupError && groupMembers && groupMembers.length > 0) {
-            // Priority 1: If folder name matches one of their groups, use that.
-            const matchedGroup = groupMembers.find(gm => gm.group.name === folderName);
+            const normalize = (s) => s.replace(/\s+/g, '').toLowerCase();
+            const candidateNorm = normalize(candidateTitle);
+
+            const matchedGroup = groupMembers.find(gm => {
+                const groupNorm = normalize(gm.group.name);
+                // Exact match OR prefix match
+                return groupNorm === candidateNorm || groupNorm.startsWith(candidateNorm);
+            });
+
             if (matchedGroup) {
                 targetClassTitle = matchedGroup.group.name;
-                console.log(`   -> matched group: ${targetClassTitle}`);
+                if (matchedGroup.group.teacher) {
+                    assignedTeacherName = matchedGroup.group.teacher.name;
+                }
+                console.log(`   -> [GROUP MATCH] Folder '${candidateTitle}' matched Group '${matchedGroup.group.name}'`);
             } else {
-                // Priority 2: If file is in a generic folder, but student is in a group, use the first group.
-                // Assuming 1 student usually belongs to 1 main class group for now.
-                // If they are in multiple, we might need more logic, but taking the first one is a safe "auto-sort" default.
-                targetClassTitle = groupMembers[0].group.name;
-                console.log(`   -> auto-sorted to group: ${targetClassTitle}`);
+                console.log(`   -> [TOPIC CLASS] Using folder name: ${candidateTitle}`);
             }
         }
 
@@ -262,6 +466,8 @@ async function processImage(filePath, rootDir, fileName) {
             .limit(1);
 
         let classId;
+        let isNewClass = false;
+
         if (classes && classes.length > 0) {
             classId = classes[0].id;
         } else {
@@ -283,6 +489,7 @@ async function processImage(filePath, rootDir, fileName) {
 
             if (createError) throw createError;
             classId = newClass.id;
+            isNewClass = true;
         }
 
         // 4. Image Duplication Check
@@ -315,14 +522,26 @@ async function processImage(filePath, rootDir, fileName) {
             .from('blackboard-images')
             .getPublicUrl(storagePath);
 
+
+        // Determine Material Type (Teacher vs Normal)
+        let materialType = 'blackboard_image';
+        if (assignedTeacherName && fileName.includes(assignedTeacherName)) {
+            materialType = 'teacher_blackboard_image';
+            console.log(`      [TEACHER MATERIAL DECTECTED] Matches '${assignedTeacherName}'`);
+        }
+
+        // IMPROVED: Extract order_index from filename (leading numbers)
+        const orderMatch = fileName.match(/^(\d+)/);
+        const orderIndex = orderMatch ? parseInt(orderMatch[1]) : 0;
+
         const { error: materialError } = await supabase
             .from('materials')
             .insert({
                 class_id: classId,
-                type: 'blackboard_image',
+                type: materialType,
                 title: fileName,
                 content_url: publicUrlData.publicUrl,
-                order_index: 0
+                order_index: orderIndex
             });
 
         if (materialError) throw materialError;
@@ -330,11 +549,28 @@ async function processImage(filePath, rootDir, fileName) {
         console.log(`   -> [SUCCESS] Uploaded.`);
         addToCache(filePath);
 
-        // 6. Catch-up: Check for Sibling Videos (using the SAME targetClassTitle)
-        await scanForSiblingVideos(classId, path.dirname(filePath), targetClassTitle, classDate);
+        // 7. Catch-up: Check for Sibling Teacher Boards
+        await scanForSiblingTeacherBoards(classId, path.dirname(filePath), targetClassTitle, classDate);
 
     } catch (err) {
         console.error(`   -> [ERROR] ${err.message}`);
+
+        // Rollback: If this was a new class and upload failed, delete the empty class
+        if (isNewClass && classId) {
+            try {
+                const { count } = await supabase
+                    .from('materials')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('class_id', classId);
+
+                if (count === 0) {
+                    console.log(`   -> [ROLLBACK] Deleting empty class created for failed upload: ${targetClassTitle}`);
+                    await supabase.from('classes').delete().eq('id', classId);
+                }
+            } catch (cleanupErr) {
+                console.error(`   -> [ROLLBACK FAILED] Could not delete empty class: ${cleanupErr.message}`);
+            }
+        }
     }
 }
 
@@ -391,60 +627,177 @@ async function scanForSiblingVideos(classId, folderPath, className, classDate) {
     }
 }
 
+async function findTeacher(name) {
+    try {
+        const { data } = await supabase
+            .from('teachers')
+            .select('id, name')
+            .ilike('name', `%${name.trim()}%`)
+            .limit(1);
+        return data && data.length > 0 ? data[0] : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function scanForSiblingTeacherBoards(classId, folderPath, className, classDate) {
+    try {
+        const files = fs.readdirSync(folderPath);
+        const images = files.filter(f => isImage(f));
+
+        for (const imgFile of images) {
+            // Extract Name
+            // Extract Name
+            let namePart = extractStudentName(imgFile);
+
+            // Avoid re-checking known students (optimization: if we could, but simple check is fast enough)
+            // Check if this file is a teacher file
+            const teacherData = await findTeacher(namePart);
+            if (teacherData) {
+                // Check if linked
+                const { count } = await supabase
+                    .from('materials')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('class_id', classId)
+                    .eq('title', imgFile);
+
+                if (count > 0) continue;
+
+                console.log(`   -> Found detected teacher sibling: ${imgFile}. Linking...`);
+
+                // Find uploaded content_url in _shared/teachers
+                // We look for any material with this title that has type 'teacher_blackboard_image'
+                const { data: existingMaterials } = await supabase
+                    .from('materials')
+                    .select('content_url')
+                    .eq('title', imgFile)
+                    .eq('type', 'teacher_blackboard_image')
+                    .limit(1);
+
+                let contentUrl;
+                if (existingMaterials && existingMaterials.length > 0) {
+                    contentUrl = existingMaterials[0].content_url;
+                } else {
+                    // Trigger upload if not found
+                    console.log(`      Teacher board not on server yet. triggering upload...`);
+                    await processTeacherImage(path.join(folderPath, imgFile), folderPath, imgFile);
+                    // processTeacherImage will link to ALL classes including this one if it finds it
+                    // but due to timing, if we just created this class, processTeacherImage might find it NOW.
+                    continue;
+                }
+
+                if (contentUrl) {
+                    const orderMatch = imgFile.match(/^(\d+)/);
+                    const orderIndex = orderMatch ? parseInt(orderMatch[1]) : 0;
+
+                    await supabase.from('materials').insert({
+                        class_id: classId,
+                        type: 'teacher_blackboard_image',
+                        title: imgFile,
+                        content_url: contentUrl,
+                        order_index: orderIndex
+                    });
+                    console.log(`      + Linked teacher board to this class.`);
+                }
+            }
+        }
+
+    } catch (e) {
+        console.error(`Error scanning teacher siblings: ${e.message}`);
+    }
+}
+
+// Helper to setup watcher for a single directory
+function setupWatcher(dirPath, fileQueue) {
+    console.log(`Setting up watcher for: ${dirPath}`);
+    try {
+        fs.watch(dirPath, { recursive: true }, (eventType, filename) => {
+            if (filename && eventType === 'rename') {
+                const fullPath = path.join(dirPath, filename);
+                if (fs.existsSync(fullPath)) {
+                    try {
+                        const stats = fs.statSync(fullPath);
+                        if (stats.isFile()) {
+                            if (!fileQueue.includes(fullPath)) {
+                                console.log(`[NEW FILE DETECTED] ${filename} in ${dirPath}`);
+                                fileQueue.push({ filePath: fullPath, rootDir: dirPath });
+                            }
+                        }
+                    } catch (e) { }
+                }
+            }
+        });
+        return true;
+    } catch (e) {
+        console.error(`Failed to watch ${dirPath}: ${e.message}`);
+        return false;
+    }
+}
+
 async function main() {
     console.log("==================================================");
     console.log("   ClassIn Archive - Persistent Folder Monitor");
     console.log("==================================================");
 
-    let watchDir = "";
+    let watchDirs = [];
 
     // Load config if exists
     if (fs.existsSync(CONFIG_FILE)) {
         try {
             const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-            if (config.watchDir && fs.existsSync(config.watchDir)) {
-                watchDir = config.watchDir;
-                console.log(`Loaded config for folder: ${watchDir}`);
+            if (config.watchDirs && Array.isArray(config.watchDirs)) {
+                watchDirs = config.watchDirs.filter(d => fs.existsSync(d));
+            } else if (config.watchDir && fs.existsSync(config.watchDir)) {
+                watchDirs = [config.watchDir];
             }
         } catch (e) {
             console.error("Config file corrupted, resetting...");
         }
     }
 
-    if (!watchDir) {
-        watchDir = await askQuestion("Enter the full path of the folder to watch: ");
-        watchDir = watchDir.trim().replace(/^["']|["']$/g, '');
+    if (watchDirs.length === 0) {
+        console.log("No valid watch directories found in config.");
+        const inputDir = await askQuestion("Enter a folder path to watch (you can add more in monitor-config.json later): ");
+        const cleanDir = inputDir.trim().replace(/^["']|["']$/g, '');
 
-        if (!fs.existsSync(watchDir)) {
+        if (fs.existsSync(cleanDir)) {
+            watchDirs.push(cleanDir);
+            // Save config
+            fs.writeFileSync(CONFIG_FILE, JSON.stringify({ watchDirs }, null, 2));
+        } else {
             console.error("Error: Folder does not exist!");
             await new Promise(r => setTimeout(r, 3000));
             process.exit(1);
         }
-
-        // Save config
-        fs.writeFileSync(CONFIG_FILE, JSON.stringify({ watchDir }, null, 2));
     }
+
+    console.log(`\nMonitoring ${watchDirs.length} directories:`);
+    watchDirs.forEach(d => console.log(` - ${d}`));
 
     console.log("\nPerforming Initial Scan (Checking for new files)...");
 
-    try {
-        const allFiles = getAllFiles(watchDir);
-        console.log(`Found ${allFiles.length} files. Checking against server...`);
+    for (const dir of watchDirs) {
+        try {
+            const allFiles = getAllFiles(dir);
+            console.log(`[${path.basename(dir)}] Found ${allFiles.length} files. Checking against server...`);
 
-        for (const file of allFiles) {
-            await processFile(file, watchDir);
+            for (const file of allFiles) {
+                await processFile(file, dir);
+            }
+        } catch (e) {
+            console.error(`Scan failed for ${dir}:`, e.message);
         }
-    } catch (e) {
-        console.error("Scan failed:", e);
     }
 
     console.log("\nInitial Scan Complete. Starting Real-time Monitor...");
-    console.log(`Monitoring: ${watchDir}`);
     console.log("(Minimize this window to keep running in background)");
 
     // Real-time Watcher
     let isProcessing = false;
-    let fileQueue = [];
+    let fileQueue = []; // Array of objects { filePath, rootDir }
+
+    // Setup watchers for all dirs
+    watchDirs.forEach(dir => setupWatcher(dir, fileQueue));
 
     // Processor Loop
     setInterval(async () => {
@@ -452,33 +805,28 @@ async function main() {
         isProcessing = true;
 
         while (fileQueue.length > 0) {
-            const filePath = fileQueue.shift();
+            const item = fileQueue.shift();
+            // Handle both object (new style) and string (old style compat)
+            let filePath, rootDir;
+            if (typeof item === 'string') {
+                filePath = item;
+                // Try to infer rootDir? 
+                // For safety, let's assume it belongs to the first watchDir if not specified (legacy fallback)
+                rootDir = watchDirs[0];
+            } else {
+                filePath = item.filePath;
+                rootDir = item.rootDir;
+            }
+
             // Wait 1 sec to ensure file write is complete (very common issue with huge images)
             await new Promise(r => setTimeout(r, 1000));
 
             if (fs.existsSync(filePath)) {
-                await processFile(filePath, watchDir);
+                await processFile(filePath, rootDir);
             }
         }
         isProcessing = false;
     }, 2000);
-
-    fs.watch(watchDir, { recursive: true }, (eventType, filename) => {
-        if (filename && eventType === 'rename') {
-            const fullPath = path.join(watchDir, filename);
-            if (fs.existsSync(fullPath)) {
-                try {
-                    const stats = fs.statSync(fullPath);
-                    if (stats.isFile()) {
-                        if (!fileQueue.includes(fullPath)) {
-                            console.log(`[NEW FILE DETECTED] ${filename}`);
-                            fileQueue.push(fullPath);
-                        }
-                    }
-                } catch (e) { }
-            }
-        }
-    });
 }
 
 main();

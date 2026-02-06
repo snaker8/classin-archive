@@ -1,6 +1,7 @@
 'use server'
 
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { unstable_noStore as noStore } from 'next/cache'
 
 
 // Helper to generate signed URL
@@ -54,7 +55,10 @@ async function signStorageUrl(url: string) {
 
 // Improved helper that handles various URL formats or raw paths
 async function getSignedUrlForMaterial(material: any) {
-    if (material.type !== 'blackboard_image' || !material.content_url) {
+    if (
+        (material.type !== 'blackboard_image' && material.type !== 'teacher_blackboard_image') ||
+        !material.content_url
+    ) {
         return material.content_url;
     }
 
@@ -91,6 +95,7 @@ async function getSignedUrlForMaterial(material: any) {
 
 
 export async function getClass(classId: string) {
+    noStore()
     try {
         // We can use supabaseAdmin directly to bypass RLS
 
@@ -141,6 +146,7 @@ export async function getClass(classId: string) {
 
 
 export async function getAllClasses({ page = 1, limit = 20, search = '' } = {}) {
+    noStore()
     try {
         let query = supabaseAdmin
             .from('classes')
@@ -173,6 +179,7 @@ export async function getAllClasses({ page = 1, limit = 20, search = '' } = {}) 
 }
 
 export async function getStudentClasses(studentId: string) {
+    noStore()
     try {
         // 1. Fetch classes for student
         const { data: classesData, error: classesError } = await supabaseAdmin

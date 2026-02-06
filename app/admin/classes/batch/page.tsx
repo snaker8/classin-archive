@@ -17,6 +17,7 @@ interface ParsedClass {
     files: File[]
     status: 'pending' | 'uploading' | 'success' | 'error'
     message?: string
+    isTeacherBoard?: boolean
 }
 
 export default function BatchClassPage() {
@@ -24,24 +25,29 @@ export default function BatchClassPage() {
     const [classes, setClasses] = useState<ParsedClass[]>([])
     const [loading, setLoading] = useState(false)
     const [students, setStudents] = useState<Profile[]>([])
+    const [teachers, setTeachers] = useState<{ id: string, name: string }[]>([])
     const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 })
+    const [rejectedFiles, setRejectedFiles] = useState<{ path: string; reason: string }[]>([])
 
-    // Load students for matching
+    // Load students and teachers
     useEffect(() => {
-        const loadStudents = async () => {
-            const { data } = await supabase.from('profiles').select('*').eq('role', 'student')
-            if (data) setStudents(data)
+        const loadData = async () => {
+            const { data: studentData } = await supabase.from('profiles').select('*').eq('role', 'student')
+            if (studentData) setStudents(studentData)
+
+            const { getTeachers } = await import('@/app/actions/teacher')
+            const { teachers: teacherData } = await getTeachers()
+            if (teacherData) setTeachers(teacherData)
         }
-        loadStudents()
+        loadData()
     }, [])
 
     // Smart Folder Parsing Logic
-    // Utility to traverse directories
     async function getFilesFromEvent(event: any) {
+        // ... (Keep existing recursion logic)
         const items = event.dataTransfer ? event.dataTransfer.items : event.target.files
         const files: File[] = []
 
-        // Normalize to array
         const itemSearchParams = []
         if (event.dataTransfer) {
             for (let i = 0; i < items.length; i++) {
@@ -52,7 +58,6 @@ export default function BatchClassPage() {
                 }
             }
         } else {
-            // Fallback for non-drag input (unlikely to be recursive properly without webkitdirectory)
             for (let i = 0; i < items.length; i++) {
                 files.push(items[i])
             }
@@ -65,8 +70,6 @@ export default function BatchClassPage() {
             if (item.isFile) {
                 return new Promise<void>((resolve) => {
                     item.file((file: any) => {
-                        // Manually define webkitRelativePath since it might be missing in some cases
-                        // or we want to construct full path from the root drop
                         Object.defineProperty(file, 'webkitRelativePath', {
                             value: path + file.name
                         });
@@ -85,12 +88,11 @@ export default function BatchClassPage() {
 
                     if (result.length > 0) {
                         entries = entries.concat(result)
-                        await readEntries() // Continue reading (Chrome limit 100)
+                        await readEntries()
                     }
                 }
 
                 await readEntries()
-
                 const promises = entries.map((entry) => traverseFileTree(entry, path + item.name + "/"))
                 await Promise.all(promises)
             }
@@ -99,14 +101,10 @@ export default function BatchClassPage() {
         return files
     }
 
-
-    // Smart Folder Parsing Logic
     const onDrop = useCallback((acceptedFiles: File[]) => {
         const newClassesMap = new Map<string, ParsedClass>()
         const newRejected: { path: string; reason: string }[] = []
 
-        // Create a mapping of simplified names to student objects for matching
-        // e.g. "Hong Gil Dong" -> "honggildong"
         const studentMap = new Map<string, Profile>()
         students.forEach(s => {
             if (s.full_name) {
@@ -117,12 +115,53 @@ export default function BatchClassPage() {
 
         acceptedFiles.forEach(file => {
             const pathParts = file.webkitRelativePath.split('/')
+            const filename = pathParts[pathParts.length - 1]
 
+            // 0. Check for Teacher Board (Higher Priority)
+            const matchedTeacher = teachers.find(t => filename.includes(t.name))
+
+            if (matchedTeacher) {
+                // Teacher Board Detection
+                // We use the date from the folder structure if possible
+                let date = new Date().toISOString().split('T')[0]
+
+                // Try to find a date in the path
+                // Simple regex for 2024-01-01 or 2024.01.01 or 240101? 
+                // Let's stick to the existing logic: usually date is parent folder?
+                // Or if it matches a student folder structure, use that date.
+                // For simplicity, let's look for a date-like folder name.
+                // Or just default to today if not granularly detectable.
+
+                // Reuse logic A/B from below to determine "Context" (Date)
+                const parentIndex = pathParts.length - 2
+                let folderDate = ''
+                // Very basic date parsing from folder names if possible, else today
+
+                const key = `TEACHER_${matchedTeacher.id}_${file.webkitRelativePath}` // Unique per file to allow multiple teacher uploads
+
+                // We treat each teacher file as a "Task" to distribute
+                if (!newClassesMap.has(key)) {
+                    newClassesMap.set(key, {
+                        id: key,
+                        studentName: `${matchedTeacher.name} 선생님 (일괄 배포)`,
+                        studentId: matchedTeacher.id, // Use teacher ID as placeholder
+                        date: date,
+                        files: [],
+                        status: 'pending',
+                        message: '선생님 판서 (해당 날짜 모든 수업에 배포)',
+                        isTeacherBoard: true
+                    })
+                }
+                newClassesMap.get(key)!.files.push(file)
+                return // Skip student matching
+            }
+
+            // Normal Student Matching ...
             let matchedStudent: Profile | undefined
             let studentIndex = -1
 
-            // 1. Search for Student Name in path parts (folders)
-            for (let i = 0; i < pathParts.length - 1; i++) { // Exclude filename from this loop
+            // 1. Search for Student Name in path parts
+            for (let i = 0; i < pathParts.length - 1; i++) {
                 const part = pathParts[i]
                 if (studentMap.has(part) || studentMap.has(part.replace(/\s/g, ''))) {
                     matchedStudent = studentMap.get(part) || studentMap.get(part.replace(/\s/g, ''))
@@ -132,42 +171,25 @@ export default function BatchClassPage() {
             }
 
             // 2. If not found in folders, check Filename
-            // e.g. "이윤빈_null_과사람.csv" -> "이윤빈"
             if (!matchedStudent) {
-                const filename = pathParts[pathParts.length - 1]
-                // Try splitting by common delimiters
                 const possibleNames = filename.split(/[_.\s-]/)
-                // Check if the first part is a student name
                 const firstNamePart = possibleNames[0]
 
                 if (studentMap.has(firstNamePart)) {
                     matchedStudent = studentMap.get(firstNamePart)
-                    // If matched from filename, the "studentIndex" is effectively the file itself, 
-                    // so the Class Title should be the Parent Folder (index - 1 relative to file)
                     studentIndex = pathParts.length - 1
                 }
             }
 
             if (matchedStudent && studentIndex !== -1) {
-                // 3. Determine Class Title 
                 let classTitle = ''
-
-                // Case A: Student Name found in Folder (i.e. index < length - 1)
-                // Use the folder AFTER the student name as title
                 if (studentIndex < pathParts.length - 1) {
-                    // If there IS a folder after student name
                     if (studentIndex + 1 < pathParts.length - 1) {
                         classTitle = pathParts[studentIndex + 1]
                     } else {
-                        // Directly in student folder
                         classTitle = `${new Date().toLocaleDateString('ko-KR')} 업로드`
                     }
-                }
-                // Case B: Student Name found in Filename (i.e. index == length - 1)
-                // Use the PARENT folder as title
-                else {
-                    // Parent folder is at index - 2 (since pathParts include filename)
-                    // e.g. Root/Class/StudentFile.png -> Length 3. Index 2. Parent is 1 ('Class')
+                } else {
                     const parentIndex = pathParts.length - 2
                     if (parentIndex >= 0) {
                         classTitle = pathParts[parentIndex]
@@ -183,67 +205,57 @@ export default function BatchClassPage() {
                         id: key,
                         studentName: matchedStudent.full_name,
                         studentId: matchedStudent.id,
-                        date: new Date().toISOString().split('T')[0], // Default to Today
+                        date: new Date().toISOString().split('T')[0],
                         files: [],
                         status: 'pending',
                         message: classTitle
                     })
                 }
-
-                // Accept all files for now as user might be uploading CSVs or whatever
-                // But generally "Class Materials" are images/videos. 
-                // User showed CSVs in screenshot, maybe they want to attach them?
-                // Let's relax the type check or just allow safe types. 
-                // For now, I will keep the image check BUT allow CSV/PDF if that's what they want?
-                // The user's screenshot showed CSVs being rejected with "No matching student".
-                // If I fix the match, they might get "Not an image file".
-                // Let's allow generic files if they aren't images.
-
                 newClassesMap.get(key)!.files.push(file)
             } else {
-                newRejected.push({ path: file.webkitRelativePath, reason: `No matching student found in path or filename` })
+                newRejected.push({ path: file.webkitRelativePath, reason: `No matching student or teacher found` })
             }
         })
 
-        const parsedList = Array.from(newClassesMap.values()).map(cls => {
-            // We already matched studentId
-            return {
-                ...cls,
-                // If message was used for title, let's keep it or logic handles it in upload
-            }
-        })
-
+        const parsedList = Array.from(newClassesMap.values())
         setClasses(prev => [...prev, ...parsedList])
         setRejectedFiles(prev => [...prev, ...newRejected])
-    }, [students])
+    }, [students, teachers])
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        getFilesFromEvent: (event) => getFilesFromEvent(event).then(f => f), // Use our custom recursor
+        getFilesFromEvent: (event) => getFilesFromEvent(event).then(f => f),
         noClick: false,
         noKeyboard: true
     })
 
-    // Start Bulk Upload
     const handleUpload = async () => {
-        const pendingClasses = classes.filter(c => c.status === 'pending' && c.studentId && c.files.length > 0)
+        const pendingClasses = classes.filter(c => c.status === 'pending' && c.files.length > 0)
         if (pendingClasses.length === 0) return
 
         setLoading(true)
         setUploadProgress({ current: 0, total: pendingClasses.length })
 
-        for (let i = 0; i < pendingClasses.length; i++) {
-            const cls = pendingClasses[i]
+        // 1. Separate Teacher Boards and Student Classes
+        const studentClasses = pendingClasses.filter(c => !c.isTeacherBoard)
+        const teacherBoards = pendingClasses.filter(c => c.isTeacherBoard)
 
-            // Update status to uploading
+        // 2. Upload Student Classes First (to ensure classes exist)
+        for (const cls of studentClasses) {
+            await processClass(cls)
+        }
+
+        // 3. Upload and Distribute Teacher Boards
+        for (const board of teacherBoards) {
+            await processTeacherBoard(board)
+        }
+
+        async function processClass(cls: ParsedClass) {
             setClasses(prev => prev.map(c => c.id === cls.id ? { ...c, status: 'uploading' } : c))
-
             try {
                 const user = await supabase.auth.getUser()
                 if (!user.data.user) throw new Error("Not authenticated")
 
-                // 1. Create Class
-                // Use cls.message (extracted folder name) as title if available, otherwise default
                 const title = cls.message && cls.message !== ''
                     ? cls.message
                     : `${new Date(cls.date).toLocaleDateString('ko-KR')} 수업`
@@ -253,7 +265,7 @@ export default function BatchClassPage() {
                     .insert({
                         student_id: cls.studentId,
                         title: title,
-                        class_date: cls.date, // Default Today from parsing
+                        class_date: cls.date,
                         created_by: user.data.user.id
                     })
                     .select()
@@ -261,20 +273,13 @@ export default function BatchClassPage() {
 
                 if (classError) throw classError
 
-                // 2. Upload Images
                 for (let j = 0; j < cls.files.length; j++) {
                     const file = cls.files[j]
                     const fileName = `${cls.studentId}/${cls.date}/${Date.now()}-${j}-${file.name}`
-
-                    const { error: uploadError } = await supabase.storage
-                        .from('blackboard-images')
-                        .upload(fileName, file)
-
+                    const { error: uploadError } = await supabase.storage.from('blackboard-images').upload(fileName, file)
                     if (uploadError) throw uploadError
 
-                    const { data: urlData } = supabase.storage
-                        .from('blackboard-images')
-                        .getPublicUrl(fileName)
+                    const { data: urlData } = supabase.storage.from('blackboard-images').getPublicUrl(fileName)
 
                     await supabase.from('materials').insert({
                         class_id: classData.id,
@@ -283,15 +288,67 @@ export default function BatchClassPage() {
                         order_index: j
                     })
                 }
-
-                // Success
                 setClasses(prev => prev.map(c => c.id === cls.id ? { ...c, status: 'success' } : c))
-
             } catch (err: any) {
                 console.error(err)
                 setClasses(prev => prev.map(c => c.id === cls.id ? { ...c, status: 'error', message: err.message } : c))
             }
+            setUploadProgress(prev => ({ ...prev, current: prev.current + 1 }))
+        }
 
+        async function processTeacherBoard(item: ParsedClass) {
+            setClasses(prev => prev.map(c => c.id === item.id ? { ...c, status: 'uploading' } : c))
+            try {
+                // Upload File Once
+                const file = item.files[0] // Assume 1 file per teacher board entry for now, or loop
+                const extension = file.name.split('.').pop() || 'png'
+                const baseName = file.name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "_")
+                const fileName = `teacher-uploads/${item.date}/${Date.now()}-${baseName}.${extension}`
+
+                const { error: uploadError } = await supabase.storage.from('blackboard-images').upload(fileName, file)
+                if (uploadError) throw uploadError
+
+                const { data: urlData } = supabase.storage.from('blackboard-images').getPublicUrl(fileName)
+                const publicUrl = urlData.publicUrl
+
+                // Distribute to ALL classes on that date
+                // We can use a direct DB query here since we are client-side admin (or effectively valid user) called supabase
+                // But better to use the server action for safety/consistency?
+                // Wait, we are in 'use client' component, so we can't use server action directly if it uses cookies? 
+                // Actually server actions are fine.
+
+                // However, we want to include the classes we JUST created in `studentClasses` loop.
+                // The server action queries the DB.
+                // Since we awaited `processClass`, the DB should be up to date.
+
+                // Let's manually do it to avoid import issues or just call logic.
+                // We will query classes on date.
+
+                const { data: classesOnDate, error: classQueryError } = await supabase
+                    .from('classes')
+                    .select('id')
+                    .eq('class_date', item.date)
+
+                if (classQueryError) throw classQueryError
+
+                if (classesOnDate && classesOnDate.length > 0) {
+                    const materials = classesOnDate.map(c => ({
+                        class_id: c.id,
+                        type: 'teacher_blackboard_image',
+                        content_url: publicUrl,
+                        order_index: 0
+                    }))
+
+                    const { error: insertError } = await supabase.from('materials').insert(materials)
+                    if (insertError) throw insertError
+                }
+
+                setClasses(prev => prev.map(c => c.id === item.id ? { ...c, status: 'success', message: `${classesOnDate?.length || 0}개 수업 배포 완료` } : c))
+
+            } catch (err: any) {
+                console.error(err)
+                setClasses(prev => prev.map(c => c.id === item.id ? { ...c, status: 'error', message: err.message } : c))
+            }
             setUploadProgress(prev => ({ ...prev, current: prev.current + 1 }))
         }
 
@@ -302,16 +359,11 @@ export default function BatchClassPage() {
         setClasses(prev => prev.filter(c => c.id !== id))
     }
 
-    const validClassesCount = classes.filter(c => c.studentId && c.files.length > 0 && c.status === 'pending').length
+    const validClassesCount = classes.filter(c => c.status === 'pending').length
+    // ... (rest is render)
 
-    const [rejectedFiles, setRejectedFiles] = useState<{ path: string; reason: string }[]>([])
-
-    // ... (inside return, before Drop Zone or after it)
-
-    // Add debug UI after Drop Zone
     return (
         <div className="max-w-6xl mx-auto space-y-6">
-            {/* ... (Header and Upload Button SAME AS BEFORE) ... */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
                     <Button variant="ghost" onClick={() => router.push('/admin/dashboard')}>
@@ -326,7 +378,6 @@ export default function BatchClassPage() {
                     </div>
                 </div>
                 <div className="flex items-center space-x-2">
-                    {/* ... (Upload Button Logic SAME) ... */}
                     {loading && (
                         <div className="text-sm text-muted-foreground mr-4">
                             진행률: {uploadProgress.current} / {uploadProgress.total}
@@ -345,27 +396,25 @@ export default function BatchClassPage() {
                         ) : (
                             <>
                                 <Upload className="h-4 w-4 mr-2" />
-                                {validClassesCount}개 수업 일괄 등록
+                                {validClassesCount}개 항목 일괄 등록
                             </>
                         )}
                     </Button>
                 </div>
             </div>
 
-            {/* Info Banner */}
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800 flex items-start">
                 <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0 mt-0.5" />
                 <div>
                     <strong>폴더 구조 안내:</strong>
                     <p className="mt-1">
                         <code>[아무폴더] / [학생이름] / [수업명(선택)] / 이미지파일들...</code><br />
-                        예: <code>내PC / 홍길동 / 1단원 / 필기.jpg</code> → '1단원' 수업 생성<br />
-                        예: <code>내PC / 홍길동 / 필기.jpg</code> → '2024.01.17 업로드' 수업 생성
+                        <strong>선생님 판서 자동 배포:</strong> 파일명에 선생님 이름이 포함되면 해당 날짜의 모든 수업에 자동 배포됩니다.<br />
+                        예: <code>김선생_수학필기.jpg</code> → 오늘 날짜 모든 수업에 배포
                     </p>
                 </div>
             </div>
 
-            {/* Drop Zone */}
             <Card className="border-2 border-dashed border-gray-300 shadow-none hover:border-primary transition-colors">
                 <div {...getRootProps()} className="p-12 text-center cursor-pointer">
                     <input {...getInputProps()} />
@@ -379,7 +428,6 @@ export default function BatchClassPage() {
                 </div>
             </Card>
 
-            {/* Ignored Files Debug Info */}
             {rejectedFiles.length > 0 && (
                 <div className="bg-gray-100 rounded-lg p-4 text-xs font-mono max-h-40 overflow-y-auto">
                     <h4 className="font-bold text-gray-700 mb-2">무시된 파일들 ({rejectedFiles.length}개) - 디버깅용</h4>
@@ -395,18 +443,16 @@ export default function BatchClassPage() {
                 </div>
             )}
 
-
-            {/* Parsed Results */}
             {classes.length > 0 && (
                 <div className="grid grid-cols-1 gap-4">
                     {classes.map((cls) => (
                         <Card key={cls.id} className={`${cls.status === 'success' ? 'bg-green-50 border-green-200' :
                             cls.status === 'error' ? 'bg-red-50 border-red-200' :
-                                !cls.studentId ? 'bg-yellow-50 border-yellow-200' : 'bg-white'
+                                cls.isTeacherBoard ? 'bg-purple-50 border-purple-200' : // Purple for teacher
+                                    !cls.studentId ? 'bg-yellow-50 border-yellow-200' : 'bg-white'
                             }`}>
                             <CardContent className="p-4 flex items-center justify-between">
                                 <div className="flex items-center space-x-6">
-                                    {/* Status Icon */}
                                     <div className="w-8 flex-shrink-0">
                                         {cls.status === 'pending' && <div className="w-3 h-3 rounded-full bg-gray-300 mx-auto" />}
                                         {cls.status === 'uploading' && <Loader2 className="h-5 w-5 animate-spin text-primary mx-auto" />}
@@ -414,11 +460,13 @@ export default function BatchClassPage() {
                                         {cls.status === 'error' && <AlertCircle className="h-6 w-6 text-red-600 mx-auto" />}
                                     </div>
 
-                                    {/* Info */}
                                     <div>
                                         <div className="flex items-center space-x-2">
-                                            <h4 className="font-bold text-lg">{cls.studentName}</h4>
-                                            {!cls.studentId && (
+                                            <h4 className="font-bold text-lg">
+                                                {cls.studentName}
+                                                {cls.isTeacherBoard && <span className="ml-2 text-xs bg-purple-600 text-white px-2 py-0.5 rounded">일괄 배포</span>}
+                                            </h4>
+                                            {!cls.studentId && !cls.isTeacherBoard && (
                                                 <span className="text-xs bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded">
                                                     학생 못 찾음
                                                 </span>
@@ -432,14 +480,12 @@ export default function BatchClassPage() {
                                             <span className="flex items-center">
                                                 <FileImage className="h-3 w-3 mr-1" />
                                                 파일 {cls.files.length}개
-                                                {cls.files.length === 0 && <span className="text-red-500 ml-1">(파일 없음)</span>}
                                             </span>
                                         </div>
-                                        {cls.message && <div className="text-xs text-red-600 mt-1">{cls.message}</div>}
+                                        {cls.message && <div className={`text-xs mt-1 ${cls.status === 'success' ? 'text-green-600' : 'text-muted-foreground'}`}>{cls.message}</div>}
                                     </div>
                                 </div>
 
-                                {/* Actions */}
                                 {cls.status === 'pending' && (
                                     <Button variant="ghost" size="sm" onClick={() => removeClass(cls.id)}>
                                         삭제

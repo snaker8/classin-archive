@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "classin-archive"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

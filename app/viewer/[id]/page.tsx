@@ -234,7 +234,7 @@ export default function ViewerPage() {
   const teacherImages = materials.filter(m => m.type === 'teacher_blackboard_image')
   const videos = materials.filter(m => m.type === 'video_link')
 
-  const [boardMode, setBoardMode] = useState<'student' | 'teacher'>('student')
+  const [boardMode, setBoardMode] = useState<'student' | 'teacher' | 'compare'>('student')
 
   // Auto-switch to teacher mode if only teacher images exist
   useEffect(() => {
@@ -243,7 +243,10 @@ export default function ViewerPage() {
     }
   }, [materials])
 
-  const images = boardMode === 'student' ? studentImages : teacherImages
+  // In compare mode, we use the larger length to determine pages
+  const images = boardMode === 'student' ? studentImages
+    : boardMode === 'teacher' ? teacherImages
+      : (studentImages.length > teacherImages.length ? studentImages : teacherImages)
 
   const onFlip = useCallback((e: any) => {
     setCurrentPage(e.data)
@@ -376,6 +379,7 @@ export default function ViewerPage() {
                 {classInfo.title}
                 {boardMode === 'teacher' && <span className="text-xs bg-amber-600 px-2 py-0.5 rounded text-white ml-2">선생님 판서</span>}
                 {boardMode === 'student' && teacherImages.length > 0 && <span className="text-xs bg-blue-600 px-2 py-0.5 rounded text-white ml-2">학생 판서</span>}
+                {boardMode === 'compare' && <span className="text-xs bg-purple-600 px-2 py-0.5 rounded text-white ml-2">비교 학습</span>}
               </h1>
               <p className="text-xs sm:text-sm text-gray-300">{formatDate(classInfo.class_date)}</p>
             </div>
@@ -391,7 +395,7 @@ export default function ViewerPage() {
                     : 'text-gray-300 hover:text-white'
                     }`}
                 >
-                  학생 판서
+                  학생
                 </button>
                 <button
                   onClick={() => setBoardMode('teacher')}
@@ -400,19 +404,30 @@ export default function ViewerPage() {
                     : 'text-gray-300 hover:text-white'
                     }`}
                 >
-                  선생님 판서
+                  선생님
+                </button>
+                <button
+                  onClick={() => setBoardMode('compare')}
+                  className={`px-3 py-1 text-sm rounded-md transition-all ${boardMode === 'compare'
+                    ? 'bg-purple-600 text-white shadow-sm' // Purple for compare
+                    : 'text-gray-300 hover:text-white'
+                    }`}
+                >
+                  비교
                 </button>
               </div>
             )}
 
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setViewMode(prev => prev === 'flip' ? 'scroll' : 'flip')}
-              className="text-white hover:text-white hover:bg-gray-700 border border-gray-600 mr-2"
-            >
-              {viewMode === 'flip' ? '📜 스크롤 보기' : '📖 책 넘김 보기'}
-            </Button>
+            {boardMode !== 'compare' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setViewMode(prev => prev === 'flip' ? 'scroll' : 'flip')}
+                className="text-white hover:text-white hover:bg-gray-700 border border-gray-600 mr-2"
+              >
+                {viewMode === 'flip' ? '📜 스크롤 보기' : '📖 책 넘김 보기'}
+              </Button>
+            )}
 
             {videos.length > 0 && (
               <Button
@@ -442,6 +457,7 @@ export default function ViewerPage() {
       <main className="flex-1 flex items-center justify-center p-4 overflow-hidden relative">
         <div className="relative w-full h-full flex items-center justify-center">
           {images.length === 0 && videos.length > 0 ? (
+            // ... (Video Only View - unchanged)
             <div className="text-center">
               <div className="mb-6">
                 <Play className="h-20 w-20 text-red-600 mx-auto opacity-80" />
@@ -458,6 +474,46 @@ export default function ViewerPage() {
                 <ExternalLink className="h-5 w-5 ml-3" />
               </Button>
             </div>
+          ) : boardMode === 'compare' ? (
+            // COMPARE VIEW (Split Screen)
+            <div className="w-full h-full flex flex-col md:flex-row gap-4 overflow-hidden">
+              {/* Left/Top: Student */}
+              <div className="flex-1 flex flex-col bg-black/20 rounded-xl overflow-hidden border border-white/10">
+                <div className="p-2 bg-blue-600/20 text-blue-200 text-center text-sm font-bold border-b border-white/10">
+                  학생 판서
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {studentImages.map((image, index) => (
+                    <div key={image.id} className="w-full" id={`student-page-${index}`}>
+                      <div className="mb-1 text-xs text-gray-400">Page {index + 1}</div>
+                      <VisibleImage src={image.content_url} index={index} />
+                    </div>
+                  ))}
+                  {studentImages.length === 0 && (
+                    <div className="h-full flex items-center justify-center text-gray-500">자료 없음</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right/Bottom: Teacher */}
+              <div className="flex-1 flex flex-col bg-black/20 rounded-xl overflow-hidden border border-white/10">
+                <div className="p-2 bg-amber-600/20 text-amber-200 text-center text-sm font-bold border-b border-white/10">
+                  선생님 판서
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {teacherImages.map((image, index) => (
+                    <div key={image.id} className="w-full" id={`teacher-page-${index}`}>
+                      <div className="mb-1 text-xs text-gray-400">Page {index + 1}</div>
+                      <VisibleImage src={image.content_url} index={index} />
+                    </div>
+                  ))}
+                  {teacherImages.length === 0 && (
+                    <div className="h-full flex items-center justify-center text-gray-500">자료 없음</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
           ) : viewMode === 'scroll' ? (
             <div className="w-full h-full overflow-y-auto overflow-x-hidden p-4 space-y-4 flex flex-col items-center">
               {images.map((image, index) => (
@@ -534,12 +590,18 @@ export default function ViewerPage() {
         <div className="max-w-7xl mx-auto">
           {/* Page Counter */}
           <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-medium">
-              페이지 {currentPage + 1} / {images.length}
-            </div>
+            {boardMode === 'compare' ? (
+              <div className="text-sm font-medium text-gray-300">
+                비교 학습 모드 (스크롤하여 확인하세요)
+              </div>
+            ) : (
+              <div className="text-sm font-medium">
+                페이지 {currentPage + 1} / {images.length}
+              </div>
+            )}
 
             {/* Mobile Navigation - Only for Flip Mode */}
-            {isMobile && viewMode === 'flip' && (
+            {isMobile && viewMode === 'flip' && boardMode !== 'compare' && (
               <div className="flex space-x-2">
                 <Button
                   variant="secondary"
@@ -561,35 +623,38 @@ export default function ViewerPage() {
             )}
 
             <div className="text-xs text-gray-400 hidden sm:block">
-              {viewMode === 'flip'
-                ? (isMobile ? '좌우로 스와이프' : '화살표 키로 이동 • 더블클릭으로 확대')
-                : '스크롤하여 보기'
+              {boardMode === 'compare' ? '양쪽 패널을 각각 스크롤할 수 있습니다' :
+                viewMode === 'flip'
+                  ? (isMobile ? '좌우로 스와이프' : '화살표 키로 이동 • 더블클릭으로 확대')
+                  : '스크롤하여 보기'
               }
             </div>
           </div>
 
           {/* Thumbnail Navigation */}
-          <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
-            {images.map((image, index) => (
-              <button
-                key={image.id}
-                onClick={() => goToPage(index)}
-                className={`relative flex-shrink-0 transition-all ${currentPage === index
-                  ? 'ring-2 ring-primary scale-110'
-                  : 'opacity-60 hover:opacity-100'
-                  }`}
-              >
-                <img
-                  src={image.content_url}
-                  alt={`Page ${index + 1}`}
-                  className="w-12 h-16 sm:w-16 sm:h-20 object-cover rounded border-2 border-gray-600"
-                />
-                <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs text-center py-0.5">
-                  {index + 1}
-                </div>
-              </button>
-            ))}
-          </div>
+          {boardMode !== 'compare' && (
+            <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
+              {images.map((image, index) => (
+                <button
+                  key={image.id}
+                  onClick={() => goToPage(index)}
+                  className={`relative flex-shrink-0 transition-all ${currentPage === index
+                    ? 'ring-2 ring-primary scale-110'
+                    : 'opacity-60 hover:opacity-100'
+                    }`}
+                >
+                  <img
+                    src={image.content_url}
+                    alt={`Page ${index + 1}`}
+                    className="w-12 h-16 sm:w-16 sm:h-20 object-cover rounded border-2 border-gray-600"
+                  />
+                  <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs text-center py-0.5">
+                    {index + 1}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </footer>
 

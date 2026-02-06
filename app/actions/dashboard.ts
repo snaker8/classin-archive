@@ -1,43 +1,93 @@
 'use server'
 
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { unstable_noStore as noStore } from 'next/cache'
 
-export async function getDashboardData() {
+export async function getDashboardData(center?: string, hall?: string) {
+    noStore()
     try {
-        // 1. Fetch all students
-        const { data: students, error: studentsError } = await supabaseAdmin
+        let studentQuery = supabaseAdmin
             .from('profiles')
             .select('*')
             .eq('role', 'student')
+
+        if (center && center !== '전체') {
+            studentQuery = studentQuery.eq('center', center)
+        }
+        if (hall && hall !== '전체') {
+            studentQuery = studentQuery.eq('hall', hall)
+        }
+
+        const { data: students, error: studentsError } = await studentQuery
             .order('created_at', { ascending: false })
 
         if (studentsError) throw studentsError
 
         // 2. Fetch recent classes with student info
-        const { data: recentClasses, error: classesError } = await supabaseAdmin
+        let classesQuery = supabaseAdmin
             .from('classes')
             .select(`
-        *,
-        student:profiles!classes_student_id_fkey(*)
-      `)
+                *,
+                student:profiles!classes_student_id_fkey(*)
+            `)
+
+        if (center && center !== '전체') {
+            classesQuery = classesQuery.filter('student.center', 'eq', center)
+        }
+        if (hall && hall !== '전체') {
+            classesQuery = classesQuery.filter('student.hall', 'eq', hall)
+        }
+
+        const { data: recentClassesRaw, error: classesError } = await classesQuery
             .order('created_at', { ascending: false })
             .limit(5)
 
         if (classesError) throw classesError
 
+        // Filter out null results (which happen if join doesn't match filter)
+        const recentClasses = recentClassesRaw?.filter(c => c.student) || []
+
         // 3. Fetch stats (counts)
-        const { count: studentCount } = await supabaseAdmin
+        let studentCountQuery = supabaseAdmin
             .from('profiles')
             .select('*', { count: 'exact', head: true })
             .eq('role', 'student')
 
-        const { count: classCount } = await supabaseAdmin
-            .from('classes')
-            .select('*', { count: 'exact', head: true })
+        if (center && center !== '전체') {
+            studentCountQuery = studentCountQuery.eq('center', center)
+        }
+        if (hall && hall !== '전체') {
+            studentCountQuery = studentCountQuery.eq('hall', hall)
+        }
 
-        const { count: materialCount } = await supabaseAdmin
+        const { count: studentCount } = await studentCountQuery
+
+        // For classes and materials
+        let classCountQuery = supabaseAdmin
+            .from('classes')
+            .select('id, student:profiles!classes_student_id_fkey!inner(center, hall)', { count: 'exact', head: true })
+
+        if (center && center !== '전체') {
+            classCountQuery = classCountQuery.eq('student.center', center)
+        }
+        if (hall && hall !== '전체') {
+            classCountQuery = classCountQuery.eq('student.hall', hall)
+        }
+
+        const { count: classCount } = await classCountQuery
+
+        let materialCountQuery = supabaseAdmin
             .from('materials')
-            .select('*', { count: 'exact', head: true })
+            .select('id, class:classes!inner(student:profiles!classes_student_id_fkey!inner(center, hall))', { count: 'exact', head: true })
+
+        if (center && center !== '전체') {
+            materialCountQuery = materialCountQuery.eq('class.student.center', center)
+        }
+        if (hall && hall !== '전체') {
+            materialCountQuery = materialCountQuery.eq('class.student.hall', hall)
+        }
+
+        const { count: materialCount } = await materialCountQuery
 
         // 4. Get unique class titles for filtering
         const { data: allClasses } = await supabaseAdmin

@@ -76,20 +76,20 @@ export default function StudentLayout({
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto px-4 py-3 md:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-primary rounded-lg">
-                <BookOpen className="h-6 w-6 text-white" />
+              <div className="p-1.5 md:p-2 bg-primary rounded-lg">
+                <BookOpen className="h-5 w-5 md:h-6 md:w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold">ClassIn 학습 아카이브</h1>
-                <p className="text-sm text-muted-foreground">{userName}님 환영합니다</p>
+                <h1 className="text-base md:text-xl font-bold">ClassIn 학습 아카이브</h1>
+                <p className="text-[10px] md:text-sm text-muted-foreground">{userName}님 환영합니다</p>
               </div>
             </div>
-            <Button variant="ghost" size="sm" onClick={handleSignOut}>
-              <LogOut className="h-4 w-4 mr-2" />
-              로그아웃
+            <Button variant="ghost" size="sm" onClick={handleSignOut} className="px-2 md:px-3">
+              <LogOut className="h-4 w-4 md:mr-2" />
+              <span className="hidden md:inline">로그아웃</span>
             </Button>
           </div>
         </div>

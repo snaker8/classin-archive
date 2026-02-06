@@ -218,8 +218,34 @@ export default function ViewerPage() {
     }
   }
 
-  const images = materials.filter(m => m.type === 'blackboard_image')
+  const images = materials.filter(m => m.type === 'blackboard_image' || m.type === 'teacher_blackboard_image')
   const videos = materials.filter(m => m.type === 'video_link')
+
+  // Group images by order_index for Split View
+  const groupedImages = images.reduce((acc, img) => {
+    const idx = img.order_index;
+    if (!acc[idx]) acc[idx] = { student: null, teacher: null };
+    if (img.type === 'teacher_blackboard_image') acc[idx].teacher = img;
+    else acc[idx].student = img;
+    return acc;
+  }, {} as Record<number, { student: Material | null, teacher: Material | null }>);
+
+  // Convert to sorted array of groups
+  const imageGroups = Object.keys(groupedImages)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map(idx => ({ index: idx, ...groupedImages[idx] }));
+
+  // Flattened images for single view (Teacher high priority if exists)
+  const displayImages = viewMode === 'scroll' || viewMode === 'flip'
+    ? images.filter(m => m.type === 'blackboard_image') // Current logic keeps student images as primary
+    : [];
+
+  const [isSplitView, setIsSplitView] = useState(false);
+
+  // Re-define images based on split view
+  const currentImages = isSplitView ? imageGroups : images.filter(m => m.type === 'blackboard_image');
+
 
   const onFlip = useCallback((e: any) => {
     setCurrentPage(e.data)
@@ -299,7 +325,7 @@ export default function ViewerPage() {
     )
   }
 
-  if (!classInfo || images.length === 0) {
+  if (!classInfo || (images.length === 0 && !isSplitView)) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="text-center">
@@ -329,7 +355,7 @@ export default function ViewerPage() {
   }
 
   const { width, height } = getBookDimensions()
-  const showTwoPages = !isMobile && images.length > 1
+  const showTwoPages = !isMobile && currentImages.length > 1
 
   return (
     <div className="fixed inset-0 bg-gradient-to-br from-gray-900 to-gray-800 flex flex-col">
@@ -355,6 +381,21 @@ export default function ViewerPage() {
           </div>
 
           <div className="flex items-center space-x-2">
+            <Button
+              variant={isSplitView ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setIsSplitView(!isSplitView)}
+              className={`text-sm ${isSplitView ? 'bg-blue-600 hover:bg-blue-700' : 'text-white hover:bg-gray-700 border border-gray-600'}`}
+            >
+              <div className="flex items-center gap-2">
+                <div className="flex gap-[1px]">
+                  <div className="w-2 h-3 border border-current rounded-[1px]" />
+                  <div className="w-2 h-3 border border-current rounded-[1px]" />
+                </div>
+                <span>분할 보기 {isSplitView ? 'ON' : 'OFF'}</span>
+              </div>
+            </Button>
+
             <Button
               variant="ghost"
               size="sm"
@@ -393,11 +434,44 @@ export default function ViewerPage() {
         <div className="relative w-full h-full flex items-center justify-center">
           {viewMode === 'scroll' ? (
             <div className="w-full h-full overflow-y-auto overflow-x-hidden p-4 space-y-4 flex flex-col items-center">
-              {images.map((image, index) => (
-                <div id={`page-${index}`} key={image.id} className="max-w-3xl w-full">
-                  <VisibleImage src={image.content_url} index={index} />
-                </div>
-              ))}
+              {isSplitView ? (
+                // Split View Scroll Mode
+                imageGroups.map((group, index) => (
+                  <div id={`page-${index}`} key={index} className="w-full max-w-6xl">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Teacher Board */}
+                      <div className="space-y-2">
+                        <div className="text-center text-xs text-blue-400 font-bold uppercase tracking-wider bg-blue-900/30 py-1 rounded">Teacher Board</div>
+                        {group.teacher ? (
+                          <VisibleImage src={group.teacher.content_url} index={index} />
+                        ) : (
+                          <div className="bg-gray-800/50 rounded-lg h-[400px] flex items-center justify-center border-2 border-dashed border-gray-700 text-gray-500">
+                            선생님 판서 없음
+                          </div>
+                        )}
+                      </div>
+                      {/* Student Board */}
+                      <div className="space-y-2">
+                        <div className="text-center text-xs text-green-400 font-bold uppercase tracking-wider bg-green-900/30 py-1 rounded">My Board</div>
+                        {group.student ? (
+                          <VisibleImage src={group.student.content_url} index={index} />
+                        ) : (
+                          <div className="bg-gray-800/50 rounded-lg h-[400px] flex items-center justify-center border-2 border-dashed border-gray-700 text-gray-500">
+                            판서 없음
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                // Normal Scroll Mode
+                currentImages.map((image: any, index: number) => (
+                  <div id={`page-${index}`} key={image.id} className="max-w-3xl w-full">
+                    <VisibleImage src={image.content_url} index={index} />
+                  </div>
+                ))
+              )}
               <div className="h-20 shrink-0" /> {/* Spacer */}
             </div>
           ) : (
@@ -427,14 +501,44 @@ export default function ViewerPage() {
                   onChangeOrientation={() => { }}
                   onChangeState={() => { }}
                 >
-                  {images.map((image, index) => (
-                    <div key={image.id} className="page">
-                      <Page
-                        imageUrl={image.content_url}
-                        pageNumber={index + 1}
-                      />
-                    </div>
-                  ))}
+                  {isSplitView ? (
+                    // Split View Flip Mode
+                    imageGroups.map((group, index) => (
+                      <div key={index} className="page">
+                        <div className="relative w-full h-full bg-gray-900 flex flex-col p-2">
+                          <div className="grid grid-rows-2 h-full gap-2">
+                            <div className="relative bg-white rounded-lg overflow-hidden border-2 border-blue-500/30">
+                              <div className="absolute top-0 right-0 bg-blue-500 text-white px-2 py-0.5 text-[10px] z-10 font-bold">Teacher</div>
+                              {group.teacher ? (
+                                <img src={group.teacher.content_url} className="w-full h-full object-contain" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">선생님 판서 없음</div>
+                              )}
+                            </div>
+                            <div className="relative bg-white rounded-lg overflow-hidden border-2 border-green-500/30">
+                              <div className="absolute top-0 right-0 bg-green-500 text-white px-2 py-0.5 text-[10px] z-10 font-bold">My Work</div>
+                              {group.student ? (
+                                <img src={group.student.content_url} className="w-full h-full object-contain" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">나의 판서 없음</div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] text-gray-500">Page {index + 1}</div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    // Normal Flip Mode
+                    currentImages.map((image: any, index: number) => (
+                      <div key={image.id} className="page">
+                        <Page
+                          imageUrl={image.content_url}
+                          pageNumber={index + 1}
+                        />
+                      </div>
+                    ))
+                  )}
                 </HTMLFlipBook>
               )}
 
@@ -450,7 +554,7 @@ export default function ViewerPage() {
                   </button>
                   <button
                     onClick={nextPage}
-                    disabled={currentPage >= images.length - (showTwoPages ? 2 : 1)}
+                    disabled={currentPage >= currentImages.length - (showTwoPages ? 2 : 1)}
                     className="absolute right-[-60px] top-1/2 -translate-y-1/2 bg-white rounded-full p-3 shadow-lg hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all z-20"
                   >
                     <ChevronRight className="h-6 w-6 text-gray-700" />
@@ -468,7 +572,7 @@ export default function ViewerPage() {
           {/* Page Counter */}
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm font-medium">
-              페이지 {currentPage + 1} / {images.length}
+              페이지 {currentPage + 1} / {currentImages.length}
             </div>
 
             {/* Mobile Navigation - Only for Flip Mode */}
@@ -486,7 +590,7 @@ export default function ViewerPage() {
                   variant="secondary"
                   size="sm"
                   onClick={nextPage}
-                  disabled={currentPage >= images.length - 1}
+                  disabled={currentPage >= currentImages.length - 1}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Button>
@@ -503,9 +607,9 @@ export default function ViewerPage() {
 
           {/* Thumbnail Navigation */}
           <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
-            {images.map((image, index) => (
+            {currentImages.map((item: any, index: number) => (
               <button
-                key={image.id}
+                key={isSplitView ? index : item.id}
                 onClick={() => goToPage(index)}
                 className={`relative flex-shrink-0 transition-all ${currentPage === index
                   ? 'ring-2 ring-primary scale-110'
@@ -513,13 +617,16 @@ export default function ViewerPage() {
                   }`}
               >
                 <img
-                  src={image.content_url}
+                  src={isSplitView ? (item.student?.content_url || item.teacher?.content_url) : item.content_url}
                   alt={`Page ${index + 1}`}
                   className="w-12 h-16 sm:w-16 sm:h-20 object-cover rounded border-2 border-gray-600"
                 />
                 <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs text-center py-0.5">
                   {index + 1}
                 </div>
+                {isSplitView && item.teacher && item.student && (
+                  <div className="absolute top-0 right-0 bg-blue-500 w-2 h-2 rounded-full border border-white" />
+                )}
               </button>
             ))}
           </div>

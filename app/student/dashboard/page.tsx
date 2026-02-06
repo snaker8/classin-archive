@@ -158,15 +158,21 @@ export default function StudentDashboard() {
   return (
     <div className="space-y-6">
       {/* Welcome Section */}
-      <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl p-6 text-white shadow-lg">
-        <div className="flex items-start justify-between">
+      <div className="relative overflow-hidden rounded-2xl md:rounded-3xl p-6 md:p-8 text-white shadow-2xl">
+        <div className="absolute inset-0 bg-gradient-to-r from-primary to-violet-600 z-0" />
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 z-0 mix-blend-overlay" />
+        <div className="absolute -top-24 -right-24 w-64 h-64 bg-white/20 rounded-full blur-3xl" />
+        <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-indigo-900/40 rounded-full blur-3xl" />
+
+        <div className="relative z-10 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold mb-2 flex items-center">
-              <Sparkles className="h-6 w-6 mr-2" />
+            <h1 className="text-2xl sm:text-4xl font-heading font-bold mb-2 md:mb-3 flex items-center tracking-tight">
+              <Sparkles className="h-6 w-6 md:h-8 md:w-8 mr-2 md:mr-3 text-yellow-300 animate-pulse" />
               나의 학습 라이브러리
             </h1>
-            <p className="text-blue-100 text-sm sm:text-base">
-              총 {classes.length}개의 수업이 있습니다. 오늘도 화이팅하세요! 💪
+            <p className="text-indigo-100 text-sm sm:text-lg font-medium max-w-2xl leading-relaxed">
+              총 <span className="text-white font-bold text-lg md:text-xl">{classes.length}</span>개의 수업이 기록되었습니다. <br className="hidden sm:block" />
+              오늘도 배움의 즐거움을 느껴보세요! ✨
             </p>
           </div>
         </div>
@@ -175,14 +181,16 @@ export default function StudentDashboard() {
       {/* Calendar & Filters Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Calendar Card */}
-        <Card className="lg:col-span-1">
+        <Card className="lg:col-span-1 border-white/20 bg-white/60 backdrop-blur-xl shadow-lg hover:shadow-xl transition-all duration-300">
           <div
-            className="flex items-center justify-between p-4 cursor-pointer lg:cursor-default"
+            className="flex items-center justify-between p-5 cursor-pointer lg:cursor-default border-b border-gray-100/50"
             onClick={() => setCalendarOpen(!calendarOpen)}
           >
-            <div className="flex items-center space-x-2">
-              <CalendarIcon className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold">수업 달력</h3>
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <CalendarIcon className="h-5 w-5 text-primary" />
+              </div>
+              <h3 className="font-bold text-lg">수업 달력</h3>
             </div>
             <Button
               variant="ghost"
@@ -194,7 +202,7 @@ export default function StudentDashboard() {
           </div>
 
           <div className={`${calendarOpen ? 'block' : 'hidden'} lg:block`}>
-            <CardContent className="pt-0">
+            <CardContent className="pt-4">
               <Calendar
                 mode="single"
                 selected={selectedDate}
@@ -202,7 +210,18 @@ export default function StudentDashboard() {
                 modifiers={modifiers}
                 modifiersStyles={modifiersStyles}
                 modifiersClassNames={modifiersClassNames}
-                className="rounded-md border-0"
+                className="rounded-xl border-0 w-full flex justify-center p-0"
+                classNames={{
+                  head_cell: "text-muted-foreground font-normal text-[0.8rem]",
+                  cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+                  day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors",
+                  day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-lg shadow-md scale-105 transition-transform",
+                  day_today: "bg-accent text-accent-foreground font-bold rounded-lg",
+                  day_outside: "text-muted-foreground opacity-50",
+                  day_disabled: "text-muted-foreground opacity-50",
+                  day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
+                  day_hidden: "invisible",
+                }}
                 locale={ko}
               />
 
@@ -211,15 +230,15 @@ export default function StudentDashboard() {
                   variant="outline"
                   size="sm"
                   onClick={() => setSelectedDate(undefined)}
-                  className="w-full mt-4"
+                  className="w-full mt-6 border-dashed border-primary/30 text-primary hover:bg-primary/5 hover:text-primary"
                 >
                   날짜 필터 해제
                 </Button>
               )}
 
-              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                <p className="text-xs text-blue-700 flex items-center">
-                  <span className="inline-block w-2 h-2 bg-primary rounded-full mr-2" />
+              <div className="mt-6 p-4 bg-primary/5 rounded-xl border border-primary/10">
+                <p className="text-xs text-primary/80 flex items-center justify-center font-medium">
+                  <span className="inline-block w-2 h-2 bg-primary rounded-full mr-2 shadow-[0_0_8px_rgba(var(--primary),0.5)]" />
                   파란색 점은 수업이 있는 날입니다
                 </p>
               </div>
@@ -243,28 +262,30 @@ export default function StudentDashboard() {
               </div>
 
               {/* Sort & Stats */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-muted-foreground">정렬:</span>
+              <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center sm:justify-between">
+                <div className="flex items-center space-x-1 sm:space-x-2">
+                  <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">정렬:</span>
                   <Button
                     variant={sortOrder === 'newest' ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => setSortOrder('newest')}
+                    className="flex-1 sm:flex-none h-8 text-xs"
                   >
-                    <TrendingDown className="h-4 w-4 mr-1" />
+                    <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                     최신순
                   </Button>
                   <Button
                     variant={sortOrder === 'oldest' ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => setSortOrder('oldest')}
+                    className="flex-1 sm:flex-none h-8 text-xs"
                   >
-                    <TrendingUp className="h-4 w-4 mr-1" />
+                    <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                     과거순
                   </Button>
                 </div>
 
-                <div className="text-sm text-muted-foreground">
+                <div className="text-xs sm:text-sm text-muted-foreground text-right">
                   {filteredClasses.length}개 수업
                 </div>
               </div>
@@ -405,20 +426,7 @@ export default function StudentDashboard() {
         </div>
       )}
 
-      {/* Custom Styles for Calendar */}
-      <style jsx global>{`
-        .has-class-day::after {
-          content: '';
-          position: absolute;
-          bottom: 2px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 4px;
-          height: 4px;
-          background-color: hsl(var(--primary));
-          border-radius: 50%;
-        }
-      `}</style>
+
     </div>
   )
 }

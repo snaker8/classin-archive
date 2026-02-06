@@ -10,7 +10,8 @@ export interface Profile {
   id: string
   email: string
   full_name: string
-  role: 'student' | 'admin'
+  role: 'student' | 'teacher' | 'manager' | 'super_manager' | 'admin'
+  center?: string
   created_at: string
   updated_at: string
 }
@@ -68,13 +69,15 @@ export async function signIn(email: string, password: string) {
   return data
 }
 
-export async function signUp(email: string, password: string, fullName: string) {
+export async function signUp(email: string, password: string, fullName: string, role: string = 'student', center?: string) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: {
         full_name: fullName,
+        role,
+        center
       },
     },
   })

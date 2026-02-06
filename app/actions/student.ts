@@ -76,7 +76,7 @@ export async function deleteStudent(studentId: string) {
     }
 }
 
-export async function updateStudent(studentId: string, data: { fullName?: string; password?: string }) {
+export async function updateStudent(studentId: string, data: { fullName?: string; password?: string; center?: string; hall?: string }) {
     try {
         // 1. Update Auth User (Password) if provided
         if (data.password) {
@@ -86,19 +86,26 @@ export async function updateStudent(studentId: string, data: { fullName?: string
             if (authError) throw authError
         }
 
-        // 2. Update Profile (Full Name) if provided
-        if (data.fullName) {
+        // 2. Update Profile
+        const updateData: any = {}
+        if (data.fullName) updateData.full_name = data.fullName
+        if (data.center !== undefined) updateData.center = data.center
+        if (data.hall !== undefined) updateData.hall = data.hall
+
+        if (Object.keys(updateData).length > 0) {
             const { error: profileError } = await supabaseAdmin
                 .from('profiles')
-                .update({ full_name: data.fullName })
+                .update(updateData)
                 .eq('id', studentId)
 
             if (profileError) throw profileError
 
-            // Also update metadata in auth to keep in sync
-            await supabaseAdmin.auth.admin.updateUserById(studentId, {
-                user_metadata: { full_name: data.fullName }
-            })
+            // Also update metadata in auth to keep in sync if name changed
+            if (data.fullName) {
+                await supabaseAdmin.auth.admin.updateUserById(studentId, {
+                    user_metadata: { full_name: data.fullName }
+                })
+            }
         }
 
         revalidatePath('/admin/dashboard')

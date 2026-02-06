@@ -9,10 +9,10 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { getGroups, createGroup, deleteGroup, updateGroup } from '@/app/actions/group'
 import { getTeachers } from '@/app/actions/teacher'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { Badge } from '@/components/ui/badge'
 
-export default function GroupsPage() {
+export default function ClassesPage() {
     const router = useRouter()
     const [groups, setGroups] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
@@ -169,14 +169,14 @@ export default function GroupsPage() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight">반 관리</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">수업(반) 관리</h1>
                     <p className="text-muted-foreground">
-                        학생들을 그룹(반)으로 묶어 관리하고 자료를 자동 배포합니다.
+                        반을 생성하고 관리하며, 각 반의 수업 자료를 배포합니다.
                     </p>
                 </div>
                 <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
                     <DialogTrigger asChild>
-                        <Button>
+                        <Button className="bg-indigo-600 hover:bg-indigo-700">
                             <Plus className="mr-2 h-4 w-4" />
                             새 반 만들기
                         </Button>
@@ -239,24 +239,22 @@ export default function GroupsPage() {
             {/* Filter Tabs */}
             {availableGrades.length > 0 && (
                 <div className="flex gap-2 overflow-x-auto pb-2">
-                    <Button
+                    <Badge
                         variant={selectedGrade === 'ALL' ? 'default' : 'outline'}
-                        size="sm"
+                        className="cursor-pointer text-sm py-1.5 px-4"
                         onClick={() => setSelectedGrade('ALL')}
-                        className="rounded-full"
                     >
                         전체
-                    </Button>
+                    </Badge>
                     {availableGrades.map(grade => (
-                        <Button
+                        <Badge
                             key={grade}
                             variant={selectedGrade === grade ? 'default' : 'outline'}
-                            size="sm"
+                            className="cursor-pointer text-sm py-1.5 px-4"
                             onClick={() => setSelectedGrade(grade)}
-                            className="rounded-full"
                         >
                             {grade}
-                        </Button>
+                        </Badge>
                     ))}
                 </div>
             )}
@@ -277,32 +275,32 @@ export default function GroupsPage() {
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                     {filteredGroups.map((group) => (
-                        <Card key={group.id} className="hover:shadow-md transition-shadow cursor-pointer relative group" onClick={() => router.push(`/admin/groups/${group.id}`)}>
+                        <Card key={group.id} className="hover:shadow-lg transition-all cursor-pointer relative group border-indigo-50 hover:border-indigo-200" onClick={() => router.push(`/admin/groups/${group.id}`)}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-xl font-bold truncate pr-8">
+                                <CardTitle className="text-xl font-heading font-bold truncate pr-8 text-indigo-950">
                                     {group.name}
                                 </CardTitle>
-                                <Users className="h-4 w-4 text-muted-foreground" />
+                                <Users className="h-4 w-4 text-indigo-400" />
                             </CardHeader>
                             <CardContent>
                                 <div className="text-sm font-medium text-muted-foreground mb-4 min-h-[1.25rem]">
                                     {group.description || '설명 없음'}
                                 </div>
                                 {group.teacher && (
-                                    <div className="text-sm font-medium text-emerald-600 mb-2">
+                                    <div className="text-sm font-medium text-emerald-600 mb-2 p-1 bg-emerald-50 rounded w-fit px-2">
                                         👨‍🏫 {group.teacher.name} 선생님
                                     </div>
                                 )}
-                                <div className="flex items-center justify-between mt-auto">
-                                    <div className="text-xs text-muted-foreground">
-                                        학생 {group.members?.[0]?.count || 0}명
+                                <div className="flex items-center justify-between mt-auto pt-4 border-t border-dashed">
+                                    <div className="text-xs text-muted-foreground font-medium">
+                                        학생 <span className="text-indigo-600 font-bold">{group.members?.[0]?.count || 0}</span>명
                                     </div>
 
                                     <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                            className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
                                             onClick={() => openEdit(group)}
                                         >
                                             <Pencil className="h-4 w-4" />
@@ -322,7 +320,7 @@ export default function GroupsPage() {
                     ))}
 
                     {filteredGroups.length === 0 && (
-                        <div className="col-span-full text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
+                        <div className="col-span-full text-center py-12 text-muted-foreground border-2 border-dashed rounded-lg bg-gray-50/50">
                             {searchTerm ? '검색 결과가 없습니다.' : (selectedGrade !== 'ALL' ? '해당 학년의 반이 없습니다.' : '생성된 반이 없습니다.')}
                         </div>
                     )}

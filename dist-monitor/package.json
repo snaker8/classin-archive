@@ -1,0 +1,11 @@
+{
+  "name": "classin-monitor",
+  "version": "1.0.0",
+  "description": "Minimal Folder Monitor for ClassIn Archive",
+  "scripts": {
+    "start": "node folder-monitor.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.3"
+  }
+}
