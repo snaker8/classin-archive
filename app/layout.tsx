@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Outfit, Manrope } from "next/font/google"
 import "./globals.css"
 
@@ -14,6 +14,19 @@ const manrope = Manrope({
   display: 'swap',
 })
 
+export const metadata: Metadata = {
+  title: 'ClassIn Archive',
+  description: '학습 자료 포털',
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
+}
+
 export default function RootLayout({
   children,
 }: {
@@ -21,7 +34,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko" className={`${outfit.variable} ${manrope.variable}`}>
-      <body className={manrope.className}>{children}</body>
+      <body className="antialiased">{children}</body>
     </html>
   )
 }

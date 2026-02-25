@@ -1,13 +1,12 @@
 'use client'
-// FORCE CACHE BUST: 2026-01-18T13:51:00Z
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { useMediaQuery } from 'react-responsive'
-import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch'
 import { Class, Material } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft,
   ChevronRight,
@@ -19,35 +18,45 @@ import {
   ExternalLink,
   RotateCcw,
   Loader2,
+  BookOpen,
+  SplitSquareHorizontal,
+  Scroll,
+  FileImage,
+  Video,
+  Calendar,
+  Grid3X3,
+  X,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
-// Dynamic import for HTMLFlipBook to avoid SSR issues
+// Dynamic import for HTMLFlipBook
 const HTMLFlipBook = dynamic(
   () => import('react-pageflip').then((mod) => mod.default as any),
   {
     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center h-screen bg-gray-900">
-        <div className="text-center text-white">
-          <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4" />
-          <p>칠판 닦는 중...</p>
+      <div className="flex items-center justify-center h-[50vh] bg-gradient-to-br from-primary/5 to-violet-50">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4 text-primary" />
+          <p className="text-muted-foreground font-medium">자료를 준비하고 있습니다...</p>
         </div>
       </div>
     ),
   }
 ) as any
 
-// Lazy Image Component for Manual Virtualization
+// Lazy Image Component - 모바일 최적화됨
 const VisibleImage = ({ src, index }: { src: string; index: number }) => {
   const [isVisible, setIsVisible] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => {
       setIsVisible(entry.isIntersecting)
     }, {
-      rootMargin: '200px 0px', // Load when 200px away
+      rootMargin: '300px 0px',
       threshold: 0.01
     })
 
@@ -56,28 +65,42 @@ const VisibleImage = ({ src, index }: { src: string; index: number }) => {
   }, [])
 
   return (
-    <div
+    <motion.div
       ref={ref}
-      className="relative w-full bg-white shadow-lg rounded-lg overflow-hidden shrink-0"
-      style={{ minHeight: '300px' }} // Minimum height to prevent total collapse
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(index * 0.05, 0.3) }}
+      className="relative w-full bg-white shadow-md rounded-xl overflow-hidden border"
+      style={{ minHeight: '200px' }}
     >
-      <div className="absolute top-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm z-10">
+      <div className="absolute top-2 left-2 bg-primary text-white px-2.5 py-0.5 rounded-full text-xs font-bold z-10 shadow-sm">
         {index + 1}
       </div>
 
       {isVisible ? (
-        <img
-          src={src}
-          alt={`Page ${index + 1}`}
-          className="w-full h-auto"
-          loading="eager" // Managed by JS, so load eagerly when mounted
-        />
+        <>
+          {!loaded && (
+            <div className="flex items-center justify-center p-16 text-muted-foreground bg-muted/30">
+              <Loader2 className="h-6 w-6 animate-spin mr-2" />
+              <p className="text-sm">페이지 {index + 1} 로딩 중...</p>
+            </div>
+          )}
+          <img
+            src={src}
+            alt={`Page ${index + 1}`}
+            className="w-full h-auto"
+            style={{ display: loaded ? 'block' : 'none' }}
+            loading="eager"
+            onLoad={() => setLoaded(true)}
+          />
+        </>
       ) : (
-        <div className="flex items-center justify-center p-20 text-gray-300">
-          <p>페이지 {index + 1} 로딩 대기중...</p>
+        <div className="flex items-center justify-center p-16 text-muted-foreground bg-muted/30">
+          <Loader2 className="h-6 w-6 animate-spin mr-2" />
+          <p className="text-sm">페이지 {index + 1} 로딩 중...</p>
         </div>
       )}
-    </div>
+    </motion.div>
   )
 }
 
@@ -87,81 +110,35 @@ const Page = ({ imageUrl, pageNumber }: { imageUrl: string; pageNumber: number }
   const [imageError, setImageError] = useState(false)
 
   return (
-    <div className="relative w-full h-full bg-white shadow-lg overflow-hidden">
+    <div className="relative w-full h-full bg-white shadow-xl overflow-hidden rounded-lg">
       {!imageLoaded && !imageError && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-primary" />
-            <p className="text-sm text-gray-600">칠판 닦는 중...</p>
+            <p className="text-sm text-muted-foreground">로딩 중...</p>
           </div>
         </div>
       )}
 
       {imageError && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-          <div className="text-center text-gray-500">
-            <div className="text-6xl mb-4">📝</div>
-            <p className="font-medium">자료 없음</p>
-            <p className="text-sm mt-2">이미지를 불러올 수 없습니다</p>
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+          <div className="text-center text-muted-foreground">
+            <FileImage className="h-12 w-12 mx-auto mb-4 opacity-30" />
+            <p className="font-medium">이미지를 불러올 수 없습니다</p>
           </div>
         </div>
       )}
 
-      <TransformWrapper
-        initialScale={1}
-        minScale={0.5}
-        maxScale={4}
-        doubleClick={{ mode: 'toggle' }}
-        wheel={{ step: 0.1 }}
-      >
-        {({ zoomIn, zoomOut, resetTransform }) => (
-          <>
-            <TransformComponent
-              wrapperClass="w-full h-full"
-              contentClass="w-full h-full flex items-center justify-center"
-            >
-              <img
-                src={imageUrl}
-                alt={`Page ${pageNumber}`}
-                className="max-w-full max-h-full object-contain"
-                onLoad={() => setImageLoaded(true)}
-                onError={() => setImageError(true)}
-                style={{ display: imageLoaded && !imageError ? 'block' : 'none' }}
-              />
-            </TransformComponent>
+      <img
+        src={imageUrl}
+        alt={`Page ${pageNumber}`}
+        className="w-full h-full object-contain"
+        onLoad={() => setImageLoaded(true)}
+        onError={() => setImageError(true)}
+        style={{ display: imageLoaded && !imageError ? 'block' : 'none' }}
+      />
 
-            {/* Zoom Controls */}
-            {imageLoaded && !imageError && (
-              <div className="absolute bottom-4 right-4 flex flex-col space-y-2 z-10">
-                <button
-                  onClick={() => zoomIn()}
-                  className="bg-white rounded-full p-2 shadow-lg hover:bg-gray-100"
-                  title="확대"
-                >
-                  <ZoomIn className="h-5 w-5 text-gray-700" />
-                </button>
-                <button
-                  onClick={() => zoomOut()}
-                  className="bg-white rounded-full p-2 shadow-lg hover:bg-gray-100"
-                  title="축소"
-                >
-                  <ZoomOut className="h-5 w-5 text-gray-700" />
-                </button>
-                <button
-                  onClick={() => resetTransform()}
-                  className="bg-white rounded-full p-2 shadow-lg hover:bg-gray-100"
-                  title="초기화"
-                >
-                  <RotateCcw className="h-5 w-5 text-gray-700" />
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </TransformWrapper>
-
-      {/* Page Number */}
-      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-50 text-white px-3 py-1 rounded-full text-sm">
+      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white px-4 py-1.5 rounded-full text-sm font-medium">
         {pageNumber}
       </div>
     </div>
@@ -175,20 +152,27 @@ export default function ViewerPage() {
 
   const [classInfo, setClassInfo] = useState<Class | null>(null)
   const [materials, setMaterials] = useState<Material[]>([])
-
-  // Default to 'scroll' for checked stability, can toggle to 'flip'
-  const [viewMode, setViewMode] = useState<'flip' | 'scroll'>('scroll')
-
   const [currentPage, setCurrentPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
   const flipBookRef = useRef<any>(null)
 
-  // Responsive detection
-  const isMobile = useMediaQuery({ maxWidth: 768 })
-  const isTablet = useMediaQuery({ minWidth: 769, maxWidth: 1024 })
-  const isDesktop = useMediaQuery({ minWidth: 1025 })
+  // 뷰 모드: 모바일은 scroll이 기본
+  const [viewMode, setViewMode] = useState<'flip' | 'scroll'>('scroll')
+
+  useEffect(() => {
+    const checkMobile = () => {
+      const mobile = window.innerWidth <= 768
+      setIsMobile(mobile)
+      // 모바일이면 스크롤 모드 유지, 데스크탑이면 flip도 가능
+      if (mobile) setViewMode('scroll')
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   useEffect(() => {
     loadClassData()
@@ -209,7 +193,14 @@ export default function ViewerPage() {
       }
 
       setClassInfo(classInfo)
-      setMaterials(materials || [])
+      const matList = materials || []
+      setMaterials(matList)
+
+      // Auto-enable split view if teacher boards exist
+      const hasTeacherBoards = matList.some(m => m.type === 'teacher_blackboard_image' || m.title?.startsWith('[T]'))
+      if (hasTeacherBoards) {
+        setIsSplitView(true)
+      }
     } catch (error: any) {
       console.error('Error loading class data:', error)
       setErrorMsg(error.message || 'Unknown error')
@@ -221,31 +212,21 @@ export default function ViewerPage() {
   const images = materials.filter(m => m.type === 'blackboard_image' || m.type === 'teacher_blackboard_image')
   const videos = materials.filter(m => m.type === 'video_link')
 
-  // Group images by order_index for Split View
   const groupedImages = images.reduce((acc, img) => {
     const idx = img.order_index;
     if (!acc[idx]) acc[idx] = { student: null, teacher: null };
-    if (img.type === 'teacher_blackboard_image') acc[idx].teacher = img;
+    if (img.type === 'teacher_blackboard_image' || img.title?.startsWith('[T]')) acc[idx].teacher = img;
     else acc[idx].student = img;
     return acc;
   }, {} as Record<number, { student: Material | null, teacher: Material | null }>);
 
-  // Convert to sorted array of groups
   const imageGroups = Object.keys(groupedImages)
     .map(Number)
     .sort((a, b) => a - b)
     .map(idx => ({ index: idx, ...groupedImages[idx] }));
 
-  // Flattened images for single view (Teacher high priority if exists)
-  const displayImages = viewMode === 'scroll' || viewMode === 'flip'
-    ? images.filter(m => m.type === 'blackboard_image') // Current logic keeps student images as primary
-    : [];
-
   const [isSplitView, setIsSplitView] = useState(false);
-
-  // Re-define images based on split view
-  const currentImages = isSplitView ? imageGroups : images.filter(m => m.type === 'blackboard_image');
-
+  const currentImages = isSplitView ? imageGroups : images;
 
   const onFlip = useCallback((e: any) => {
     setCurrentPage(e.data)
@@ -267,7 +248,6 @@ export default function ViewerPage() {
     if (viewMode === 'flip' && flipBookRef.current) {
       flipBookRef.current.pageFlip().flip(pageIndex)
     } else {
-      // Scroll to that element if in scroll mode
       const el = document.getElementById(`page-${pageIndex}`)
       if (el) el.scrollIntoView({ behavior: 'smooth' })
     }
@@ -283,7 +263,6 @@ export default function ViewerPage() {
     }
   }
 
-  // Keyboard navigation
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') prevPage()
@@ -293,188 +272,225 @@ export default function ViewerPage() {
 
     window.addEventListener('keydown', handleKeyPress)
     return () => window.removeEventListener('keydown', handleKeyPress)
-  }, [viewMode]) // Dependency added for viewMode
+  }, [viewMode])
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-900">
-        <div className="text-center text-white">
-          <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4" />
-          <p className="text-lg">수업 자료를 불러오는 중...</p>
-          <p className="text-sm text-gray-400 mt-2">잠시만 기다려주세요</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/30">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center"
+        >
+          <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4 text-primary" />
+          <p className="text-lg font-medium text-foreground">수업 자료를 불러오는 중...</p>
+          <p className="text-sm text-muted-foreground mt-2">잠시만 기다려주세요</p>
+        </motion.div>
       </div>
     )
   }
 
   if (errorMsg) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="text-center">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/30 p-4">
+        <Card className="p-8 text-center max-w-md w-full border-destructive/20">
           <div className="text-6xl mb-4">⚠️</div>
-          <h2 className="text-2xl font-semibold mb-2 text-red-600">오류 발생</h2>
-          <p className="text-muted-foreground mb-6">
-            {errorMsg}
-          </p>
-          <Button onClick={() => router.push('/admin/dashboard')}>
+          <h2 className="text-2xl font-semibold mb-2 text-destructive">오류 발생</h2>
+          <p className="text-muted-foreground mb-6">{errorMsg}</p>
+          <Button onClick={() => router.back()}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            대시보드로 돌아가기
+            이전 페이지로 돌아가기
           </Button>
-        </div>
+        </Card>
       </div>
     )
   }
 
   if (!classInfo || (images.length === 0 && !isSplitView)) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="text-center">
-          <div className="text-6xl mb-4">📚</div>
-          <h2 className="text-2xl font-semibold mb-2">수업 자료가 없습니다</h2>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/30 p-4">
+        <Card className="p-8 text-center max-w-md w-full border-dashed">
+          <BookOpen className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
+          <h2 className="text-2xl font-semibold mb-2 text-foreground">수업 자료가 없습니다</h2>
           <p className="text-muted-foreground mb-6">
             선생님께서 자료를 업로드하면 여기에 표시됩니다.
           </p>
-          <Button onClick={() => router.push('/student/dashboard')}>
+          <Button onClick={() => router.back()}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            대시보드로 돌아가기
+            이전 페이지로 돌아가기
           </Button>
-        </div>
+        </Card>
       </div>
     )
   }
 
-  // Calculate dimensions based on screen size
   const getBookDimensions = () => {
+    if (typeof window === 'undefined') return { width: 600, height: 800 }
     if (isMobile) {
-      return { width: window.innerWidth - 32, height: window.innerHeight - 180 }
+      return { width: Math.min(window.innerWidth - 24, 400), height: Math.min(window.innerHeight - 220, 560) }
     }
-    if (isTablet) {
-      return { width: 500, height: 700 }
+    if (window.innerWidth < 1024) {
+      return { width: 480, height: 640 }
     }
-    return { width: 600, height: 800 }
+    return { width: 580, height: 780 }
   }
 
   const { width, height } = getBookDimensions()
   const showTwoPages = !isMobile && currentImages.length > 1
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-gray-900 to-gray-800 flex flex-col">
-      {/* Header */}
-      <header className="bg-gray-800/95 backdrop-blur-sm text-white px-4 py-3 border-b border-gray-700 z-50">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30 flex flex-col">
+      {/* 모바일 최적화 헤더 */}
+      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b shadow-sm">
+        <div className="px-3 sm:px-4 py-2.5 sm:py-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* 뒤로가기 */}
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.push('/student/dashboard')}
-              className="text-white hover:text-white hover:bg-gray-700"
+              onClick={() => router.back()}
+              className="text-muted-foreground hover:text-foreground shrink-0 h-8 w-8 p-0 sm:w-auto sm:px-3"
             >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              뒤로
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">뒤로</span>
             </Button>
-            <div>
-              <h1 className="text-base sm:text-lg font-semibold flex items-center gap-2">
+
+            {/* 제목 */}
+            <div className="flex-1 min-w-0 border-l pl-2 sm:pl-3">
+              <h1 className="font-bold text-foreground text-sm sm:text-base truncate">
                 {classInfo.title}
               </h1>
-              <p className="text-xs sm:text-sm text-gray-300">{formatDate(classInfo.class_date)}</p>
+              <p className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1">
+                <Calendar className="h-3 w-3 shrink-0" />
+                {formatDate(classInfo.class_date)}
+              </p>
             </div>
-          </div>
 
-          <div className="flex items-center space-x-2">
-            <Button
-              variant={isSplitView ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setIsSplitView(!isSplitView)}
-              className={`text-sm ${isSplitView ? 'bg-blue-600 hover:bg-blue-700' : 'text-white hover:bg-gray-700 border border-gray-600'}`}
-            >
-              <div className="flex items-center gap-2">
-                <div className="flex gap-[1px]">
-                  <div className="w-2 h-3 border border-current rounded-[1px]" />
-                  <div className="w-2 h-3 border border-current rounded-[1px]" />
-                </div>
-                <span>분할 보기 {isSplitView ? 'ON' : 'OFF'}</span>
-              </div>
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setViewMode(prev => prev === 'flip' ? 'scroll' : 'flip')}
-              className="text-white hover:text-white hover:bg-gray-700 border border-gray-600 mr-2"
-            >
-              {viewMode === 'flip' ? '📜 스크롤 보기' : '📖 책 넘김 보기'}
-            </Button>
-
-            {videos.length > 0 && (
+            {/* 액션 버튼들 */}
+            <div className="flex items-center gap-1 shrink-0">
+              {/* 분할 보기 - 모바일에서도 표시 */}
               <Button
+                variant={isSplitView ? "default" : "outline"}
                 size="sm"
-                onClick={() => window.open(videos[0].content_url, '_blank')}
-                className="bg-red-600 hover:bg-red-700 text-white"
+                onClick={() => setIsSplitView(!isSplitView)}
+                className={cn(
+                  "h-8 px-2 sm:px-3 text-xs",
+                  isSplitView && "bg-gradient-to-r from-primary to-violet-600"
+                )}
               >
-                <Play className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">{videos[0].title || '수업 영상'}</span>
-                <span className="sm:hidden">영상</span>
-                <ExternalLink className="h-3 w-3 ml-2" />
+                <SplitSquareHorizontal className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline ml-1">분할</span>
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleFullscreen}
-              className="text-white hover:text-white hover:bg-gray-700 hidden sm:flex"
-            >
-              <Maximize2 className="h-4 w-4" />
-            </Button>
+
+              {/* 뷰모드 - 모바일에서는 스크롤만 */}
+              {!isMobile && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setViewMode(prev => prev === 'flip' ? 'scroll' : 'flip')}
+                  className="h-8 px-2 sm:px-3 text-xs"
+                >
+                  {viewMode === 'flip' ? (
+                    <><Scroll className="h-3.5 w-3.5" /><span className="hidden sm:inline ml-1">스크롤</span></>
+                  ) : (
+                    <><BookOpen className="h-3.5 w-3.5" /><span className="hidden sm:inline ml-1">책 넘김</span></>
+                  )}
+                </Button>
+              )}
+
+              {/* 영상 버튼 */}
+              {videos.length > 0 && (
+                <Button
+                  size="sm"
+                  onClick={() => window.open(videos[0].content_url, '_blank')}
+                  className="h-8 px-2 sm:px-3 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white text-xs"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline ml-1">영상</span>
+                </Button>
+              )}
+
+              {/* 전체화면 - 데스크탑만 */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleFullscreen}
+                className="hidden sm:flex h-8 w-8"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Main Viewer */}
-      <main className="flex-1 flex items-center justify-center p-4 overflow-hidden relative">
-        <div className="relative w-full h-full flex items-center justify-center">
-          {viewMode === 'scroll' ? (
-            <div className="w-full h-full overflow-y-auto overflow-x-hidden p-4 space-y-4 flex flex-col items-center">
+
+      {/* 메인 컨텐츠 */}
+      <main className="flex-1 overflow-hidden relative">
+        {viewMode === 'scroll' ? (
+          <div className="h-full overflow-y-auto">
+            <div className="p-3 sm:p-4 pb-32 space-y-4 max-w-4xl mx-auto">
               {isSplitView ? (
-                // Split View Scroll Mode
                 imageGroups.map((group, index) => (
-                  <div id={`page-${index}`} key={index} className="w-full max-w-6xl">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Teacher Board */}
-                      <div className="space-y-2">
-                        <div className="text-center text-xs text-blue-400 font-bold uppercase tracking-wider bg-blue-900/30 py-1 rounded">Teacher Board</div>
-                        {group.teacher ? (
-                          <VisibleImage src={group.teacher.content_url} index={index} />
-                        ) : (
-                          <div className="bg-gray-800/50 rounded-lg h-[400px] flex items-center justify-center border-2 border-dashed border-gray-700 text-gray-500">
-                            선생님 판서 없음
+                  <motion.div
+                    id={`page-${index}`}
+                    key={index}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: Math.min(index * 0.05, 0.3) }}
+                  >
+                    <Card className="overflow-hidden border">
+                      <CardContent className="p-0">
+                        <div className="p-2.5 border-b bg-muted/30">
+                          <span className="text-xs font-bold text-primary">페이지 {index + 1}</span>
+                        </div>
+                        {/* 모바일: 세로 스택, 데스크탑: 가로 나란히 */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x">
+                          {/* Teacher Board */}
+                          <div className="p-3">
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <span className="text-sm">👨‍🏫</span>
+                              <span className="text-xs font-bold text-blue-600 uppercase tracking-wide">Teacher Board</span>
+                            </div>
+                            {group.teacher ? (
+                              <img src={group.teacher.content_url} className="w-full h-auto rounded-lg border shadow-sm" alt="Teacher board" />
+                            ) : (
+                              <div className="h-32 rounded-lg bg-muted/50 border-2 border-dashed flex items-center justify-center text-muted-foreground text-xs">
+                                선생님 판서 없음
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      {/* Student Board */}
-                      <div className="space-y-2">
-                        <div className="text-center text-xs text-green-400 font-bold uppercase tracking-wider bg-green-900/30 py-1 rounded">My Board</div>
-                        {group.student ? (
-                          <VisibleImage src={group.student.content_url} index={index} />
-                        ) : (
-                          <div className="bg-gray-800/50 rounded-lg h-[400px] flex items-center justify-center border-2 border-dashed border-gray-700 text-gray-500">
-                            판서 없음
+                          {/* Student Board */}
+                          <div className="p-3">
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <span className="text-sm">📝</span>
+                              <span className="text-xs font-bold text-emerald-600 uppercase tracking-wide">My Board</span>
+                            </div>
+                            {group.student ? (
+                              <img src={group.student.content_url} className="w-full h-auto rounded-lg border shadow-sm" alt="My board" />
+                            ) : (
+                              <div className="h-32 rounded-lg bg-muted/50 border-2 border-dashed flex items-center justify-center text-muted-foreground text-xs">
+                                나의 판서 없음
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
                 ))
               ) : (
-                // Normal Scroll Mode
                 currentImages.map((image: any, index: number) => (
-                  <div id={`page-${index}`} key={image.id} className="max-w-3xl w-full">
+                  <div id={`page-${index}`} key={image.id}>
                     <VisibleImage src={image.content_url} index={index} />
                   </div>
                 ))
               )}
-              <div className="h-20 shrink-0" /> {/* Spacer */}
             </div>
-          ) : (
+          </div>
+        ) : (
+          // 플립북 모드 (데스크탑에서만)
+          <div className="h-full flex items-center justify-center p-4 sm:p-8">
             <div className="relative">
               {typeof window !== 'undefined' && (
                 <HTMLFlipBook
@@ -482,7 +498,7 @@ export default function ViewerPage() {
                   width={width}
                   height={height}
                   size="stretch"
-                  minWidth={300}
+                  minWidth={280}
                   maxWidth={1000}
                   minHeight={400}
                   maxHeight={1200}
@@ -495,137 +511,121 @@ export default function ViewerPage() {
                   style={{}}
                   startZIndex={0}
                   autoSize={true}
-                  maxShadowOpacity={0.5}
+                  maxShadowOpacity={0.3}
                   mobileScrollSupport={true}
                   onFlip={onFlip}
                   onChangeOrientation={() => { }}
                   onChangeState={() => { }}
                 >
                   {isSplitView ? (
-                    // Split View Flip Mode
                     imageGroups.map((group, index) => (
                       <div key={index} className="page">
-                        <div className="relative w-full h-full bg-gray-900 flex flex-col p-2">
+                        <div className="relative w-full h-full bg-white flex flex-col p-3 rounded-lg shadow-lg">
                           <div className="grid grid-rows-2 h-full gap-2">
-                            <div className="relative bg-white rounded-lg overflow-hidden border-2 border-blue-500/30">
-                              <div className="absolute top-0 right-0 bg-blue-500 text-white px-2 py-0.5 text-[10px] z-10 font-bold">Teacher</div>
+                            <div className="relative bg-white rounded-xl overflow-hidden border-2 border-blue-100">
+                              <div className="absolute top-0 right-0 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-3 py-1 text-[10px] z-10 font-bold rounded-bl-lg">Teacher</div>
                               {group.teacher ? (
-                                <img src={group.teacher.content_url} className="w-full h-full object-contain" />
+                                <img src={group.teacher.content_url} className="w-full h-full object-contain" alt="Teacher" />
                               ) : (
-                                <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">선생님 판서 없음</div>
+                                <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">선생님 판서 없음</div>
                               )}
                             </div>
-                            <div className="relative bg-white rounded-lg overflow-hidden border-2 border-green-500/30">
-                              <div className="absolute top-0 right-0 bg-green-500 text-white px-2 py-0.5 text-[10px] z-10 font-bold">My Work</div>
+                            <div className="relative bg-white rounded-xl overflow-hidden border-2 border-emerald-100">
+                              <div className="absolute top-0 right-0 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white px-3 py-1 text-[10px] z-10 font-bold rounded-bl-lg">My Work</div>
                               {group.student ? (
-                                <img src={group.student.content_url} className="w-full h-full object-contain" />
+                                <img src={group.student.content_url} className="w-full h-full object-contain" alt="My work" />
                               ) : (
-                                <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">나의 판서 없음</div>
+                                <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">나의 판서 없음</div>
                               )}
                             </div>
                           </div>
-                          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] text-gray-500">Page {index + 1}</div>
+                          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground font-medium">Page {index + 1}</div>
                         </div>
                       </div>
                     ))
                   ) : (
-                    // Normal Flip Mode
                     currentImages.map((image: any, index: number) => (
                       <div key={image.id} className="page">
-                        <Page
-                          imageUrl={image.content_url}
-                          pageNumber={index + 1}
-                        />
+                        <Page imageUrl={image.content_url} pageNumber={index + 1} />
                       </div>
                     ))
                   )}
                 </HTMLFlipBook>
               )}
 
-              {/* Navigation Arrows (Desktop/Tablet only) - Flip Mode Only */}
-              {!isMobile && (
+              {/* 내비게이션 화살표 - 데스크탑만 */}
+              {!isMobile && viewMode === 'flip' && (
                 <>
                   <button
                     onClick={prevPage}
                     disabled={currentPage === 0}
-                    className="absolute left-[-60px] top-1/2 -translate-y-1/2 bg-white rounded-full p-3 shadow-lg hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all z-20"
+                    className="absolute left-[-56px] top-1/2 -translate-y-1/2 bg-white rounded-full p-3 shadow-lg hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all z-20 border"
                   >
-                    <ChevronLeft className="h-6 w-6 text-gray-700" />
+                    <ChevronLeft className="h-6 w-6 text-foreground" />
                   </button>
                   <button
                     onClick={nextPage}
                     disabled={currentPage >= currentImages.length - (showTwoPages ? 2 : 1)}
-                    className="absolute right-[-60px] top-1/2 -translate-y-1/2 bg-white rounded-full p-3 shadow-lg hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all z-20"
+                    className="absolute right-[-56px] top-1/2 -translate-y-1/2 bg-white rounded-full p-3 shadow-lg hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all z-20 border"
                   >
-                    <ChevronRight className="h-6 w-6 text-gray-700" />
+                    <ChevronRight className="h-6 w-6 text-foreground" />
                   </button>
                 </>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </main>
 
-      {/* Footer Controls */}
-      <footer className="bg-gray-800/95 backdrop-blur-sm text-white px-4 py-3 border-t border-gray-700 z-50">
-        <div className="max-w-7xl mx-auto">
-          {/* Page Counter */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-medium">
-              페이지 {currentPage + 1} / {currentImages.length}
-            </div>
+      {/* 풋터 - 모바일 최적화 */}
+      <footer className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-xl border-t shadow-lg">
+        <div className="px-3 sm:px-4 pt-2 pb-safe">
+          {/* 페이지 정보 + 모바일 플립 버튼 */}
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-sm font-bold text-foreground">
+              {currentPage + 1} <span className="text-muted-foreground font-normal text-xs">/ {currentImages.length}</span>
+            </span>
 
-            {/* Mobile Navigation - Only for Flip Mode */}
             {isMobile && viewMode === 'flip' && (
-              <div className="flex space-x-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={prevPage}
-                  disabled={currentPage === 0}
-                >
+              <div className="flex gap-2">
+                <Button variant="secondary" size="sm" onClick={prevPage} disabled={currentPage === 0} className="h-8 px-3">
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={nextPage}
-                  disabled={currentPage >= currentImages.length - 1}
-                >
+                <Button variant="secondary" size="sm" onClick={nextPage} disabled={currentPage >= currentImages.length - 1} className="h-8 px-3">
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
             )}
 
-            <div className="text-xs text-gray-400 hidden sm:block">
-              {viewMode === 'flip'
-                ? (isMobile ? '좌우로 스와이프' : '화살표 키로 이동 • 더블클릭으로 확대')
-                : '스크롤하여 보기'
-              }
+            <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
+              <Grid3X3 className="h-3 w-3" />
+              {viewMode === 'flip' ? '화살표 키로 이동' : '스크롤하여 보기'}
             </div>
           </div>
 
-          {/* Thumbnail Navigation */}
-          <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
+          {/* 썸네일 바 - 모바일에서도 잘 보이게 */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
             {currentImages.map((item: any, index: number) => (
               <button
                 key={isSplitView ? index : item.id}
                 onClick={() => goToPage(index)}
-                className={`relative flex-shrink-0 transition-all ${currentPage === index
-                  ? 'ring-2 ring-primary scale-110'
-                  : 'opacity-60 hover:opacity-100'
-                  }`}
+                className={cn(
+                  "relative flex-shrink-0 transition-all rounded-md overflow-hidden",
+                  currentPage === index
+                    ? 'ring-2 ring-primary ring-offset-1 scale-105'
+                    : 'opacity-60 hover:opacity-100'
+                )}
               >
                 <img
                   src={isSplitView ? (item.student?.content_url || item.teacher?.content_url) : item.content_url}
                   alt={`Page ${index + 1}`}
-                  className="w-12 h-16 sm:w-16 sm:h-20 object-cover rounded border-2 border-gray-600"
+                  className="w-10 h-14 sm:w-12 sm:h-16 object-cover"
                 />
-                <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs text-center py-0.5">
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent text-white text-[9px] text-center py-0.5 font-medium">
                   {index + 1}
                 </div>
                 {isSplitView && item.teacher && item.student && (
-                  <div className="absolute top-0 right-0 bg-blue-500 w-2 h-2 rounded-full border border-white" />
+                  <div className="absolute top-0.5 right-0.5 bg-primary w-1.5 h-1.5 rounded-full border border-white" />
                 )}
               </button>
             ))}
@@ -633,7 +633,6 @@ export default function ViewerPage() {
         </div>
       </footer>
 
-      {/* Custom Styles */}
       <style jsx global>{`
         .flip-book {
           margin: 0 auto;
@@ -641,11 +640,13 @@ export default function ViewerPage() {
         .page {
           background-color: white;
         }
-        .scrollbar-hide::-webkit-scrollbar {
-          display: none;
+        /* 모바일 safe area */
+        .pb-safe {
+          padding-bottom: max(8px, env(safe-area-inset-bottom));
         }
-        .scrollbar-hide {
-          -ms-overflow-style: none;
+        /* 스크롤바 숨기기 */
+        ::-webkit-scrollbar-corner {
+          background: transparent;
         }
       `}</style>
     </div>

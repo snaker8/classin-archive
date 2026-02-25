@@ -1,87 +1,61 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import Image from 'next/image'
-import { supabase, getCurrentUser } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Calendar } from '@/components/ui/calendar'
-import {
-  Calendar as CalendarIcon,
-  BookOpen,
-  Video,
-  Search,
-  ChevronDown,
-  ChevronUp,
-  Sparkles,
-  TrendingDown,
-  TrendingUp,
-  Loader2,
-} from 'lucide-react'
-import { formatDate } from '@/lib/utils'
-import { format, isAfter, isBefore, startOfDay, parseISO, differenceInDays } from 'date-fns'
-import { ko } from 'date-fns/locale'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Calendar as CalendarIcon, BookOpen, Video, Search, ChevronDown, ChevronUp, Loader2, Clock, FileImage, Play, FolderOpen, X } from 'lucide-react'
+import { getStudentClasses } from '@/app/actions/class'
+import { cn, formatDate } from '@/lib/utils'
+import Image from 'next/image'
 
-interface ClassWithThumbnail {
+interface StudentClass {
   id: string
-  student_id: string
   title: string
-  description: string | null
   class_date: string
-  created_at: string
-  thumbnail_url: string | null
-  material_count: number
-  video_count: number
-  is_new: boolean
+  material_count?: number
+  thumbnail_url?: string
+  materials?: { type: string }[]
 }
-
-// Skeleton Card Component
-const SkeletonCard = () => (
-  <Card className="overflow-hidden animate-pulse">
-    <div className="aspect-[4/3] bg-gray-200" />
-    <CardContent className="p-4">
-      <div className="h-4 bg-gray-200 rounded w-20 mb-3" />
-      <div className="h-5 bg-gray-200 rounded w-full mb-2" />
-      <div className="h-4 bg-gray-200 rounded w-3/4" />
-    </CardContent>
-  </Card>
-)
 
 export default function StudentDashboard() {
   const router = useRouter()
-  const [classes, setClasses] = useState<ClassWithThumbnail[]>([])
+  const [classes, setClasses] = useState<StudentClass[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>()
-  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest')
-  const [calendarOpen, setCalendarOpen] = useState(false)
-  const [classesWithDates, setClassesWithDates] = useState<Set<string>>(new Set())
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc')
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
+  const [showCalendar, setShowCalendar] = useState(false)
 
   useEffect(() => {
     loadClasses()
   }, [])
 
-  const loadClasses = async () => {
+  async function loadClasses() {
+    setLoading(true)
     try {
-      const user = await getCurrentUser()
-      if (!user) return
-
-      // Use Server Action
-      const { getStudentClasses } = await import('@/app/actions/class')
-      const { classes: fetchedClasses, error } = await getStudentClasses(user.id)
-
-      if (error) {
-        console.error('Error loading classes:', error)
-        return
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        const result = await getStudentClasses(session.user.id)
+        if (result.classes) {
+          setClasses(result.classes)
+        }
+      } else {
+        // If session is not found, try one more time after a short delay
+        // to handle potential race conditions during navigation
+        await new Promise(resolve => setTimeout(resolve, 500))
+        const { data: { session: retrySession } } = await supabase.auth.getSession()
+        if (retrySession) {
+          const result = await getStudentClasses(retrySession.user.id)
+          if (result.classes) {
+            setClasses(result.classes)
+          }
+        }
       }
-
-      setClasses(fetchedClasses || [])
-
-      // Extract dates for calendar
-      const dates = new Set((fetchedClasses || []).map(c => c.class_date))
-      setClassesWithDates(dates)
     } catch (error) {
       console.error('Error loading classes:', error)
     } finally {
@@ -89,344 +63,429 @@ export default function StudentDashboard() {
     }
   }
 
-  // Filter and sort classes
-  const filteredClasses = useMemo(() => {
-    let result = [...classes]
+  const classDates = useMemo(() => {
+    return new Set(classes.map(c => new Date(c.class_date).toDateString()))
+  }, [classes])
 
-    // Search filter
+  const filteredClasses = useMemo(() => {
+    let filtered = [...classes]
+
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
-      result = result.filter(cls =>
-        cls.title.toLowerCase().includes(query) ||
-        cls.description?.toLowerCase().includes(query)
+      filtered = filtered.filter(cls =>
+        cls.title.toLowerCase().includes(query)
       )
     }
 
-    // Date filter
     if (selectedDate) {
-      const selectedDateStr = format(selectedDate, 'yyyy-MM-dd')
-      result = result.filter(cls => cls.class_date === selectedDateStr)
+      const selectedDateStr = selectedDate.toDateString()
+      filtered = filtered.filter(cls =>
+        new Date(cls.class_date).toDateString() === selectedDateStr
+      )
     }
 
-    // Sort
-    result.sort((a, b) => {
+    filtered.sort((a, b) => {
       const dateA = new Date(a.class_date).getTime()
       const dateB = new Date(b.class_date).getTime()
-      return sortOrder === 'newest' ? dateB - dateA : dateA - dateB
+      return sortOrder === 'desc' ? dateB - dateA : dateA - dateB
     })
 
-    return result
-  }, [classes, searchQuery, selectedDate, sortOrder])
+    return filtered
+  }, [classes, searchQuery, sortOrder, selectedDate])
 
-  // Calendar modifiers
-  const modifiers = {
-    hasClass: (date: Date) => {
-      const dateStr = format(date, 'yyyy-MM-dd')
-      return classesWithDates.has(dateStr)
-    },
-  }
-
-  const modifiersStyles = {
-    hasClass: {
-      position: 'relative' as const,
+  const stats = useMemo(() => {
+    const totalMaterials = classes.reduce((sum, cls) => sum + (cls.material_count || 0), 0)
+    const totalVideos = classes.reduce((sum, cls) =>
+      sum + (cls.materials?.filter(m => m.type.includes('video')).length || 0), 0)
+    return {
+      totalClasses: classes.length,
+      totalMaterials,
+      totalVideos,
+      thisMonth: classes.filter(cls => {
+        const date = new Date(cls.class_date)
+        const now = new Date()
+        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()
+      }).length
     }
-  }
-
-  const modifiersClassNames = {
-    hasClass: 'has-class-day'
-  }
+  }, [classes])
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        {/* Skeleton Header */}
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-64 mb-2" />
-          <div className="h-4 bg-gray-200 rounded w-48" />
-        </div>
-
-        {/* Skeleton Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {[...Array(8)].map((_, i) => (
-            <SkeletonCard key={i} />
-          ))}
-        </div>
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center"
+        >
+          <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4 text-primary" />
+          <p className="text-muted-foreground font-medium">수업 자료를 불러오는 중...</p>
+        </motion.div>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      {/* Welcome Section */}
-      <div className="relative overflow-hidden rounded-2xl md:rounded-3xl p-6 md:p-8 text-white shadow-2xl">
-        <div className="absolute inset-0 bg-gradient-to-r from-primary to-violet-600 z-0" />
-        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 z-0 mix-blend-overlay" />
-        <div className="absolute -top-24 -right-24 w-64 h-64 bg-white/20 rounded-full blur-3xl" />
-        <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-indigo-900/40 rounded-full blur-3xl" />
-
-        <div className="relative z-10 flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl sm:text-4xl font-heading font-bold mb-2 md:mb-3 flex items-center tracking-tight">
-              <Sparkles className="h-6 w-6 md:h-8 md:w-8 mr-2 md:mr-3 text-yellow-300 animate-pulse" />
-              나의 학습 라이브러리
-            </h1>
-            <p className="text-indigo-100 text-sm sm:text-lg font-medium max-w-2xl leading-relaxed">
-              총 <span className="text-white font-bold text-lg md:text-xl">{classes.length}</span>개의 수업이 기록되었습니다. <br className="hidden sm:block" />
-              오늘도 배움의 즐거움을 느껴보세요! ✨
-            </p>
+      {/* Welcome Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative overflow-hidden rounded-2xl p-6 md:p-8 bg-gradient-to-br from-primary/10 via-violet-50 to-blue-50 border"
+      >
+        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-primary/20 to-violet-200 rounded-full blur-3xl" />
+        <div className="relative z-10">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="h-2 w-2 rounded-full bg-primary shadow-sm animate-pulse" />
+            <p className="text-[10px] font-bold text-primary uppercase tracking-[0.2em]">Learning Portal</p>
           </div>
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
+            나의 학습 라이브러리
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            지금까지 {classes.length}개의 수업에서 {stats.totalMaterials}개의 자료가 등록되어 있어요
+          </p>
         </div>
-      </div>
+      </motion.div>
 
-      {/* Calendar & Filters Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Calendar Card */}
-        <Card className="lg:col-span-1 border-white/20 bg-white/60 backdrop-blur-xl shadow-lg hover:shadow-xl transition-all duration-300">
-          <div
-            className="flex items-center justify-between p-5 cursor-pointer lg:cursor-default border-b border-gray-100/50"
-            onClick={() => setCalendarOpen(!calendarOpen)}
+      {/* Stats Cards */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="grid grid-cols-2 md:grid-cols-4 gap-4"
+      >
+        {[
+          { label: '전체 수업', value: stats.totalClasses, icon: BookOpen, color: 'text-primary', bgColor: 'bg-primary/10' },
+          { label: '이번 달', value: stats.thisMonth, icon: CalendarIcon, color: 'text-blue-600', bgColor: 'bg-blue-50' },
+          { label: '총 자료', value: stats.totalMaterials, icon: FileImage, color: 'text-emerald-600', bgColor: 'bg-emerald-50' },
+          { label: '영상 자료', value: stats.totalVideos, icon: Video, color: 'text-amber-600', bgColor: 'bg-amber-50' },
+        ].map((stat, idx) => (
+          <motion.div
+            key={stat.label}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 + idx * 0.05 }}
+            whileHover={{ y: -2 }}
           >
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <CalendarIcon className="h-5 w-5 text-primary" />
-              </div>
-              <h3 className="font-bold text-lg">수업 달력</h3>
+            <Card className="border hover:shadow-md transition-shadow overflow-hidden">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className={cn("p-2.5 rounded-xl", stat.bgColor)}>
+                    <stat.icon className={cn("h-5 w-5", stat.color)} />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-foreground">{stat.value}</p>
+                    <p className="text-xs text-muted-foreground">{stat.label}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
+      </motion.div>
+
+      {/* Main Content Grid */}
+      <div className="grid lg:grid-cols-[1fr_280px] gap-6">
+        {/* Classes List */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="space-y-4"
+        >
+          {/* Search & Sort */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="수업 제목으로 검색..."
+                className="pl-10"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+                className="shrink-0"
+              >
+                {sortOrder === 'desc' ? <ChevronDown className="h-4 w-4 mr-2" /> : <ChevronUp className="h-4 w-4 mr-2" />}
+                {sortOrder === 'desc' ? '최신순' : '오래된순'}
+              </Button>
+              {/* 모바일 캘린더 토글 */}
+              <Button
+                variant={showCalendar ? 'default' : 'outline'}
+                onClick={() => setShowCalendar(!showCalendar)}
+                className="shrink-0 lg:hidden"
+              >
+                <CalendarIcon className="h-4 w-4 mr-1.5" />
+                일정
+              </Button>
+            </div>
+            {selectedDate && (
+              <Button
+                variant="outline"
+                onClick={() => { setSelectedDate(undefined); }}
+                className="shrink-0"
+              >
+                <X className="h-3.5 w-3.5 mr-1" />
+                날짜 필터 해제
+              </Button>
+            )}
+          </div>
+
+          {/* 모바일 캘린더 패널 (토글) */}
+          {showCalendar && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
               className="lg:hidden"
             >
-              {calendarOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </Button>
-          </div>
+              <Card className="border shadow-sm overflow-hidden">
+                <CardContent className="p-3">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={(date) => { setSelectedDate(date); if (date) setShowCalendar(false); }}
+                    className="rounded-md"
+                    modifiers={{ hasClass: (date) => classDates.has(date.toDateString()) }}
+                    modifiersClassNames={{ hasClass: "has-class-day" }}
+                  />
+                  {selectedDate && (
+                    <p className="text-xs text-muted-foreground mt-2 text-center">
+                      {selectedDate.toLocaleDateString('ko-KR')} 선택됨
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
 
-          <div className={`${calendarOpen ? 'block' : 'hidden'} lg:block`}>
-            <CardContent className="pt-4">
+          {/* Classes Grid */}
+          {filteredClasses.length === 0 ? (
+            <Card className="p-16 text-center border overflow-hidden relative">
+              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
+              <div className="relative z-10">
+                <div className="h-20 w-20 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-6">
+                  <BookOpen className="h-10 w-10 text-muted-foreground/30" />
+                </div>
+                <h3 className="text-xl font-bold text-foreground mb-2">
+                  {searchQuery || selectedDate ? '검색 결과가 없습니다' : '수업 준비 중입니다'}
+                </h3>
+                <p className="text-muted-foreground max-w-sm mx-auto mb-8">
+                  {searchQuery || selectedDate
+                    ? '다른 검색어나 날짜를 선택해 보세요.'
+                    : '선생님께서 수업 자료를 업로드하시면 여기에 학습 카드들이 나타납니다.'}
+                </p>
+                {!(searchQuery || selectedDate) && (
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <Button variant="outline" onClick={() => router.push('/student/calendar')}>
+                      <CalendarIcon className="h-4 w-4 mr-2" />
+                      학습 일정 확인하기
+                    </Button>
+                    <Button variant="outline" onClick={() => router.push('/student/materials')}>
+                      <FolderOpen className="h-4 w-4 mr-2" />
+                      전체 자료실 가기
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </Card>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"
+            >
+              <AnimatePresence mode="popLayout">
+                {filteredClasses.map((cls, idx) => (
+                  <motion.div
+                    key={cls.id}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ delay: idx * 0.03 }}
+                    whileHover={{ y: -4 }}
+                  >
+                    <Card
+                      className="border overflow-hidden cursor-pointer group hover:shadow-lg transition-all"
+                      onClick={() => router.push(`/student/viewer/${cls.id}`)}
+                    >
+                      {/* Thumbnail */}
+                      <div className="aspect-video relative bg-gradient-to-br from-primary/5 to-violet-50 overflow-hidden">
+                        {cls.thumbnail_url ? (
+                          <Image
+                            src={cls.thumbnail_url}
+                            alt={cls.title}
+                            fill
+                            className="object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <BookOpen className="h-8 w-8 text-primary/30" />
+                          </div>
+                        )}
+                        {/* Date Badge */}
+                        <div className="absolute top-2 left-2 px-2 py-1 rounded-md bg-white/90 backdrop-blur-sm text-xs font-medium text-foreground shadow-sm">
+                          {formatDate(cls.class_date)}
+                        </div>
+                        {/* Play Overlay */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                          <div className="h-12 w-12 rounded-full bg-white/90 backdrop-blur-sm shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 transition-all">
+                            <Play className="h-5 w-5 text-primary ml-1" />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <CardContent className="p-4">
+                        <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2 mb-2">
+                          {cls.title}
+                        </h3>
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <FileImage className="h-3 w-3" />
+                            {cls.material_count || 0}개 자료
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatDate(cls.class_date)}
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </motion.div>
+
+        {/* Calendar & Materials Sidebar - 데스크탑만 */}
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.3 }}
+          className="hidden lg:flex flex-col gap-4 lg:sticky lg:top-24 lg:h-[calc(100vh-8rem)] lg:order-last"
+        >
+          {/* Calendar */}
+          <Card className="border shrink-0 shadow-sm">
+            <CardContent className="p-4">
+              <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+                <CalendarIcon className="h-4 w-4 text-primary" />
+                수업 캘린더
+              </h3>
               <Calendar
                 mode="single"
                 selected={selectedDate}
                 onSelect={setSelectedDate}
-                modifiers={modifiers}
-                modifiersStyles={modifiersStyles}
-                modifiersClassNames={modifiersClassNames}
-                className="rounded-xl border-0 w-full flex justify-center p-0"
-                classNames={{
-                  head_cell: "text-muted-foreground font-normal text-[0.8rem]",
-                  cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-                  day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors",
-                  day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-lg shadow-md scale-105 transition-transform",
-                  day_today: "bg-accent text-accent-foreground font-bold rounded-lg",
-                  day_outside: "text-muted-foreground opacity-50",
-                  day_disabled: "text-muted-foreground opacity-50",
-                  day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
-                  day_hidden: "invisible",
+                className="rounded-md"
+                modifiers={{
+                  hasClass: (date) => classDates.has(date.toDateString())
                 }}
-                locale={ko}
+                modifiersClassNames={{
+                  hasClass: "has-class-day"
+                }}
               />
-
               {selectedDate && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSelectedDate(undefined)}
-                  className="w-full mt-6 border-dashed border-primary/30 text-primary hover:bg-primary/5 hover:text-primary"
-                >
-                  날짜 필터 해제
-                </Button>
-              )}
-
-              <div className="mt-6 p-4 bg-primary/5 rounded-xl border border-primary/10">
-                <p className="text-xs text-primary/80 flex items-center justify-center font-medium">
-                  <span className="inline-block w-2 h-2 bg-primary rounded-full mr-2 shadow-[0_0_8px_rgba(var(--primary),0.5)]" />
-                  파란색 점은 수업이 있는 날입니다
+                <p className="text-xs text-muted-foreground mt-3 text-center">
+                  {selectedDate.toLocaleDateString('ko-KR')} 선택됨
                 </p>
-              </div>
-            </CardContent>
-          </div>
-        </Card>
-
-        {/* Search & Sort Card */}
-        <Card className="lg:col-span-2">
-          <CardContent className="p-6">
-            <div className="space-y-4">
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  placeholder="수업 제목이나 내용으로 검색..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-
-              {/* Sort & Stats */}
-              <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center sm:justify-between">
-                <div className="flex items-center space-x-1 sm:space-x-2">
-                  <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">정렬:</span>
-                  <Button
-                    variant={sortOrder === 'newest' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setSortOrder('newest')}
-                    className="flex-1 sm:flex-none h-8 text-xs"
-                  >
-                    <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                    최신순
-                  </Button>
-                  <Button
-                    variant={sortOrder === 'oldest' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setSortOrder('oldest')}
-                    className="flex-1 sm:flex-none h-8 text-xs"
-                  >
-                    <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                    과거순
-                  </Button>
-                </div>
-
-                <div className="text-xs sm:text-sm text-muted-foreground text-right">
-                  {filteredClasses.length}개 수업
-                </div>
-              </div>
-
-              {/* Active Filters */}
-              {(searchQuery || selectedDate) && (
-                <div className="flex items-center space-x-2 flex-wrap gap-2">
-                  <span className="text-xs text-muted-foreground">활성 필터:</span>
-                  {searchQuery && (
-                    <div className="inline-flex items-center px-2 py-1 bg-primary/10 text-primary rounded-full text-xs">
-                      검색: "{searchQuery}"
-                      <button
-                        onClick={() => setSearchQuery('')}
-                        className="ml-1 hover:text-primary/80"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  )}
-                  {selectedDate && (
-                    <div className="inline-flex items-center px-2 py-1 bg-primary/10 text-primary rounded-full text-xs">
-                      날짜: {format(selectedDate, 'M월 d일', { locale: ko })}
-                      <button
-                        onClick={() => setSelectedDate(undefined)}
-                        className="ml-1 hover:text-primary/80"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  )}
-                </div>
               )}
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          {/* Materials Panel */}
+          <Card className="border shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden bg-white/50 backdrop-blur-sm">
+            {(() => {
+              const selectedClassForMaterials = selectedDate
+                ? classes.find(cls => new Date(cls.class_date).toDateString() === selectedDate.toDateString())
+                : classes[0];
+
+              if (!selectedClassForMaterials) {
+                return (
+                  <>
+                    <div className="p-4 border-b bg-muted/30 shrink-0 flex items-center justify-between">
+                      <h3 className="font-bold text-foreground flex items-center gap-2 text-sm">
+                        <FolderOpen className="h-4 w-4 text-primary" />
+                        Materials
+                      </h3>
+                    </div>
+                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground">
+                      <BookOpen className="h-8 w-8 mb-3 opacity-20" />
+                      <span className="text-sm">등록된 학습 자료가 없습니다</span>
+                    </div>
+                  </>
+                );
+              }
+
+              return (
+                <>
+                  <div className="p-4 border-b bg-muted/30 shrink-0 flex items-center justify-between">
+                    <h3 className="font-bold text-foreground flex items-center gap-2 text-sm">
+                      <FolderOpen className="h-4 w-4 text-primary" />
+                      Materials
+                    </h3>
+                    <span className="text-xs text-muted-foreground font-medium bg-white px-2 py-1 rounded-md shadow-sm border">
+                      {formatDate(selectedClassForMaterials.class_date)}
+                    </span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-0 scrollbar-hide">
+                    {(!selectedClassForMaterials.materials || selectedClassForMaterials.materials.length === 0) ? (
+                      <div className="flex flex-col items-center justify-center h-full p-8 text-center text-muted-foreground">
+                        <BookOpen className="h-8 w-8 mb-3 opacity-20" />
+                        <span className="text-sm">등록된 자료가 없습니다</span>
+                      </div>
+                    ) : (
+                      <div className="divide-y">
+                        {selectedClassForMaterials.materials.map((m: any, idx: number) => (
+                          <div key={idx} className="p-4 hover:bg-white transition-colors group">
+                            <div className="flex items-center gap-3">
+                              <div className={cn("p-2.5 rounded-xl shrink-0 transition-colors",
+                                m.type === 'video_link' ? 'bg-rose-50 text-rose-600 group-hover:bg-rose-100' :
+                                  m.type?.includes('teacher') ? 'bg-blue-50 text-blue-600 group-hover:bg-blue-100' :
+                                    'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100'
+                              )}>
+                                {m.type === 'video_link' ? <Video className="h-4 w-4" /> :
+                                  m.type?.includes('teacher') ? <BookOpen className="h-4 w-4" /> : <FileImage className="h-4 w-4" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-sm font-bold text-slate-800 truncate mb-0.5">
+                                  {m.title || (m.type === 'video_link' ? 'Video Record' : 'Lecture Note')}
+                                </h4>
+                                <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">
+                                  {m.type === 'video_link' ? 'Video' : 'Document'}
+                                </p>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs h-7 px-4 rounded-full bg-slate-100 text-slate-600 hover:bg-primary hover:text-white transition-colors font-bold"
+                                onClick={() => {
+                                  if (m.type === 'video_link' && m.content_url) {
+                                    window.open(m.content_url, '_blank');
+                                  } else {
+                                    router.push(`/student/viewer/${selectedClassForMaterials.id}`);
+                                  }
+                                }}
+                              >
+                                Open
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </Card>
+        </motion.div>
       </div>
-
-      {/* Classes Grid */}
-      {filteredClasses.length === 0 ? (
-        <div className="text-center py-16">
-          <BookOpen className="h-16 w-16 text-muted-foreground mx-auto mb-4 opacity-50" />
-          <h2 className="text-2xl font-semibold mb-2">수업을 찾을 수 없습니다</h2>
-          <p className="text-muted-foreground mb-6">
-            {searchQuery || selectedDate
-              ? '검색 조건을 변경해보세요'
-              : '선생님께서 수업 자료를 업로드하면 여기에 표시됩니다'}
-          </p>
-          {(searchQuery || selectedDate) && (
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSearchQuery('')
-                setSelectedDate(undefined)
-              }}
-            >
-              모든 필터 해제
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredClasses.map((cls) => (
-            <Card
-              key={cls.id}
-              className="overflow-hidden hover:shadow-xl transition-all duration-300 cursor-pointer group"
-              onClick={() => router.push(`/viewer/${cls.id}`)}
-            >
-              {/* Thumbnail */}
-              <div className="relative aspect-[4/3] bg-gradient-to-br from-gray-100 to-gray-200 overflow-hidden">
-                {cls.thumbnail_url ? (
-                  <Image
-                    src={cls.thumbnail_url}
-                    alt={cls.title}
-                    fill
-                    className="object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <BookOpen className="h-16 w-16 text-gray-300" />
-                  </div>
-                )}
-
-                {/* Date Badge */}
-                <div className="absolute top-3 left-3 bg-black/70 text-white px-3 py-1 rounded-full text-xs font-medium backdrop-blur-sm">
-                  {format(parseISO(cls.class_date), 'M월 d일 (eee)', { locale: ko })}
-                </div>
-
-                {/* New Badge */}
-                {cls.is_new && (
-                  <div className="absolute top-3 right-3 bg-red-500 text-white px-2 py-1 rounded-full text-xs font-bold shadow-lg animate-pulse">
-                    NEW
-                  </div>
-                )}
-
-                {/* Hover Overlay */}
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-300 flex items-center justify-center">
-                  <Button
-                    size="sm"
-                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 transform group-hover:scale-110"
-                  >
-                    복습하기 →
-                  </Button>
-                </div>
-              </div>
-
-              {/* Content */}
-              <CardContent className="p-4">
-                <h3 className="font-semibold text-base line-clamp-2 mb-2 group-hover:text-primary transition-colors">
-                  {cls.title}
-                </h3>
-
-                {cls.description && (
-                  <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                    {cls.description}
-                  </p>
-                )}
-
-                {/* Stats */}
-                <div className="flex items-center space-x-2 text-xs">
-                  {/* Blackboard Badge */}
-                  {(cls.material_count - cls.video_count > 0) && (
-                    <div className="flex items-center bg-blue-100 text-blue-700 px-2 py-1 rounded font-medium">
-                      <BookOpen className="h-3 w-3 mr-1" />
-                      <span>판서</span>
-                    </div>
-                  )}
-                  {/* Video Badge */}
-                  {cls.video_count > 0 && (
-                    <div className="flex items-center bg-red-100 text-red-700 px-2 py-1 rounded font-medium">
-                      <Video className="h-3 w-3 mr-1" />
-                      <span>영상</span>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-
     </div>
   )
 }

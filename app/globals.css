@@ -1,76 +1,74 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    /* Base Colors - Mineral & Indigo Theme */
-    --background: 210 30% 98%;
-    /* Cool Off-White */
-    --foreground: 224 71% 4%;
-    /* Deep Navy */
+    /* Base Colors - Light Theme */
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
 
     --card: 0 0% 100%;
-    --card-foreground: 224 71% 4%;
+    --card-foreground: 222 47% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 224 71% 4%;
+    --popover-foreground: 222 47% 11%;
 
-    /* Brand Colors - Electric Indigo */
-    --primary: 245 80% 60%;
-    /* Vibrant Indigo */
-    --primary-foreground: 210 20% 98%;
+    /* Stitch Purple Brand */
+    --primary: 262 83% 50%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 20% 96%;
-    /* Cool Grey Light */
-    --secondary-foreground: 224 71% 4%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
 
-    --muted: 210 20% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
 
-    --accent: 210 20% 94%;
-    --accent-foreground: 224 71% 4%;
+    --accent: 262 83% 95%;
+    --accent-foreground: 262 83% 50%;
 
     --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 0 0% 100%;
 
     --border: 220 13% 91%;
     --input: 220 13% 91%;
-    --ring: 245 80% 60%;
+    --ring: 262 83% 50%;
 
     --radius: 0.75rem;
   }
 
   .dark {
-    --background: 224 71% 4%;
-    /* Deep Void */
-    --foreground: 210 20% 98%;
+    /* Stitch Deep Navy Background */
+    --background: 222 47% 2%;
+    --foreground: 210 40% 98%;
 
-    --card: 224 71% 4%;
-    --card-foreground: 210 20% 98%;
+    --card: 222 47% 5%;
+    --card-foreground: 210 40% 98%;
 
-    --popover: 224 71% 4%;
-    --popover-foreground: 210 20% 98%;
+    --popover: 222 47% 5%;
+    --popover-foreground: 210 40% 98%;
 
-    --primary: 245 70% 65%;
-    /* Soft Indigo */
-    --primary-foreground: 210 20% 98%;
+    /* Stitch Electric Purple */
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 217 32% 12%;
-    --secondary-foreground: 210 20% 98%;
+    --secondary: 217 33% 10%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 217 32% 12%;
+    --muted: 217 33% 10%;
     --muted-foreground: 215 20% 65%;
 
-    --accent: 217 32% 12%;
-    --accent-foreground: 210 20% 98%;
+    --accent: 262 83% 15%;
+    --accent-foreground: 262 83% 70%;
 
-    --destructive: 0 62% 30%;
-    --destructive-foreground: 210 20% 98%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
 
-    --border: 217 32% 12%;
-    --input: 217 32% 12%;
-    --ring: 245 70% 65%;
+    --border: 217 33% 12%;
+    --input: 217 33% 12%;
+    --ring: 262 83% 58%;
   }
 }
 
@@ -155,4 +153,59 @@
   height: 4px;
   background-color: hsl(var(--primary));
   border-radius: 50%;
+}
+
+/* ========================================
+   모바일 최적화
+   ======================================== */
+
+/* 가로 스크롤 방지 */
+html,
+body {
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 터치 스크롤 부드럽게 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 스크롤 가능한 컨테이너 */
+.overflow-y-auto,
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* scrollbar-hide 유틸리티 */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* iOS Safe Area 지원 */
+.pb-safe {
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+
+.pt-safe {
+  padding-top: max(0px, env(safe-area-inset-top));
+}
+
+/* 모바일에서 텍스트 잘리지 않도록 */
+@media (max-width: 768px) {
+
+  /* 카드 그리드 최소 너비 방지 */
+  .grid {
+    min-width: 0;
+  }
+
+  /* 플립북 모바일 최적화 */
+  .flip-book {
+    touch-action: pan-y !important;
+  }
 }
