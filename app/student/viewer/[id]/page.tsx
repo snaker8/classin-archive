@@ -339,9 +339,15 @@ export default function ViewerPage() {
   const showTwoPages = !isMobile && currentImages.length > 1
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30 flex flex-col">
+    <div className="fixed inset-0 bg-[#0f0f13] text-gray-100 flex flex-col font-sans selection:bg-primary/30">
+      {/* Dynamic Background Effect */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[120px] opacity-50 mix-blend-screen" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/20 rounded-full blur-[120px] opacity-30 mix-blend-screen" />
+      </div>
+
       {/* 모바일 최적화 헤더 */}
-      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b shadow-sm">
+      <header className="relative bg-[#18181b]/80 backdrop-blur-xl z-50 shadow-sm border-b border-white/10">
         <div className="px-3 sm:px-4 py-2.5 sm:py-3">
           <div className="flex items-center gap-2 sm:gap-3">
             {/* 뒤로가기 */}
@@ -349,18 +355,18 @@ export default function ViewerPage() {
               variant="ghost"
               size="sm"
               onClick={() => router.back()}
-              className="text-muted-foreground hover:text-foreground shrink-0 h-8 w-8 p-0 sm:w-auto sm:px-3"
+              className="text-gray-400 hover:text-white shrink-0 h-8 w-8 p-0 sm:w-auto sm:px-3 hover:bg-white/10 transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
               <span className="hidden sm:inline ml-1">뒤로</span>
             </Button>
 
             {/* 제목 */}
-            <div className="flex-1 min-w-0 border-l pl-2 sm:pl-3">
-              <h1 className="font-bold text-foreground text-sm sm:text-base truncate">
+            <div className="flex-1 min-w-0 border-l border-white/10 pl-2 sm:pl-3">
+              <h1 className="font-bold text-gray-100 text-sm sm:text-base truncate">
                 {classInfo.title}
               </h1>
-              <p className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1">
+              <p className="text-[10px] sm:text-xs text-gray-400 flex items-center gap-1">
                 <Calendar className="h-3 w-3 shrink-0" />
                 {formatDate(classInfo.class_date)}
               </p>
@@ -374,8 +380,10 @@ export default function ViewerPage() {
                 size="sm"
                 onClick={() => setIsSplitView(!isSplitView)}
                 className={cn(
-                  "h-8 px-2 sm:px-3 text-xs",
-                  isSplitView && "bg-gradient-to-r from-primary to-violet-600"
+                  "h-8 px-2 sm:px-3 text-xs border-white/10",
+                  isSplitView
+                    ? "bg-primary/20 text-primary-300 ring-1 ring-primary/50 shadow-[0_0_15px_rgba(139,92,246,0.2)] hover:bg-primary/30 border-transparent"
+                    : "text-gray-300 hover:text-white hover:bg-white/10 bg-transparent"
                 )}
               >
                 <SplitSquareHorizontal className="h-3.5 w-3.5" />
@@ -388,7 +396,7 @@ export default function ViewerPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => setViewMode(prev => prev === 'flip' ? 'scroll' : 'flip')}
-                  className="h-8 px-2 sm:px-3 text-xs"
+                  className="h-8 px-2 sm:px-3 text-xs text-gray-300 hover:text-white hover:bg-white/10 border-white/10 bg-transparent"
                 >
                   {viewMode === 'flip' ? (
                     <><Scroll className="h-3.5 w-3.5" /><span className="hidden sm:inline ml-1">스크롤</span></>
@@ -403,10 +411,12 @@ export default function ViewerPage() {
                 <Button
                   size="sm"
                   onClick={() => window.open(videos[0].content_url, '_blank')}
-                  className="h-8 px-2 sm:px-3 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white text-xs"
+                  className="h-8 px-2 sm:px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-full group transition-all text-xs"
                 >
-                  <Play className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline ml-1">영상</span>
+                  <div className="bg-red-500 rounded-full p-0.5 mr-1 group-hover:scale-110 transition-transform">
+                    <Play className="h-3 w-3 text-white fill-current" />
+                  </div>
+                  <span className="hidden sm:inline font-medium">수업 영상</span>
                 </Button>
               )}
 
@@ -415,7 +425,7 @@ export default function ViewerPage() {
                 variant="ghost"
                 size="icon"
                 onClick={toggleFullscreen}
-                className="hidden sm:flex h-8 w-8"
+                className="hidden sm:flex h-8 w-8 text-gray-400 hover:text-white hover:bg-white/10"
               >
                 <Maximize2 className="h-3.5 w-3.5" />
               </Button>
@@ -439,44 +449,45 @@ export default function ViewerPage() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: Math.min(index * 0.05, 0.3) }}
                   >
-                    <Card className="overflow-hidden border">
-                      <CardContent className="p-0">
-                        <div className="p-2.5 border-b bg-muted/30">
-                          <span className="text-xs font-bold text-primary">페이지 {index + 1}</span>
-                        </div>
-                        {/* 모바일: 세로 스택, 데스크탑: 가로 나란히 */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x">
-                          {/* Teacher Board */}
-                          <div className="p-3">
-                            <div className="flex items-center gap-1.5 mb-2">
-                              <span className="text-sm">👨‍🏫</span>
-                              <span className="text-xs font-bold text-blue-600 uppercase tracking-wide">Teacher Board</span>
-                            </div>
-                            {group.teacher ? (
-                              <img src={group.teacher.content_url} className="w-full h-auto rounded-lg border shadow-sm" alt="Teacher board" />
-                            ) : (
-                              <div className="h-32 rounded-lg bg-muted/50 border-2 border-dashed flex items-center justify-center text-muted-foreground text-xs">
-                                선생님 판서 없음
-                              </div>
-                            )}
+                    <div className="bg-[#18181b]/60 backdrop-blur-md rounded-2xl overflow-hidden border border-white/5 shadow-2xl relative">
+                      <div className="p-2.5 border-b border-white/5 bg-white/5 flex items-center justify-between">
+                        <span className="text-xs font-bold text-gray-300 font-mono tracking-wide">PAGE {index + 1}</span>
+                        <span className="flex items-center gap-2 text-[10px] text-gray-500">
+                          분할 비교 모드
+                        </span>
+                      </div>
+                      {/* 모바일: 세로 스택, 데스크탑: 가로 나란히 */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4">
+                        {/* Teacher Board */}
+                        <div className="flex flex-col bg-[#1e1e24] p-3 rounded-xl border border-white/5 shadow-inner">
+                          <div className="flex items-center gap-1.5 mb-3 bg-amber-500/10 w-fit px-2 py-1 rounded-md border border-amber-500/20">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">Teacher Board</span>
                           </div>
-                          {/* Student Board */}
-                          <div className="p-3">
-                            <div className="flex items-center gap-1.5 mb-2">
-                              <span className="text-sm">📝</span>
-                              <span className="text-xs font-bold text-emerald-600 uppercase tracking-wide">My Board</span>
+                          {group.teacher ? (
+                            <img src={group.teacher.content_url} className="w-full h-auto rounded-lg shadow-sm" alt="Teacher board" />
+                          ) : (
+                            <div className="flex-1 min-h-[120px] rounded-lg bg-white/5 border border-dashed border-white/10 flex items-center justify-center text-gray-500 text-xs">
+                              선생님 판서 없음
                             </div>
-                            {group.student ? (
-                              <img src={group.student.content_url} className="w-full h-auto rounded-lg border shadow-sm" alt="My board" />
-                            ) : (
-                              <div className="h-32 rounded-lg bg-muted/50 border-2 border-dashed flex items-center justify-center text-muted-foreground text-xs">
-                                나의 판서 없음
-                              </div>
-                            )}
-                          </div>
+                          )}
                         </div>
-                      </CardContent>
-                    </Card>
+                        {/* Student Board */}
+                        <div className="flex flex-col bg-[#1e1e24] p-3 rounded-xl border border-white/5 shadow-inner">
+                          <div className="flex items-center gap-1.5 mb-3 bg-blue-500/10 w-fit px-2 py-1 rounded-md border border-blue-500/20">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                            <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">My Board</span>
+                          </div>
+                          {group.student ? (
+                            <img src={group.student.content_url} className="w-full h-auto rounded-lg shadow-sm" alt="My board" />
+                          ) : (
+                            <div className="flex-1 min-h-[120px] rounded-lg bg-white/5 border border-dashed border-white/10 flex items-center justify-center text-gray-500 text-xs">
+                              나의 판서 없음
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </motion.div>
                 ))
               ) : (
@@ -578,54 +589,53 @@ export default function ViewerPage() {
       </main>
 
       {/* 풋터 - 모바일 최적화 */}
-      <footer className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-xl border-t shadow-lg">
-        <div className="px-3 sm:px-4 pt-2 pb-safe">
+      <footer className="relative bg-[#18181b]/80 backdrop-blur-xl px-4 py-3 border-t border-white/10 z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.1)]">
+        <div className="px-1 sm:px-2 pt-1 pb-safe max-w-7xl mx-auto">
           {/* 페이지 정보 + 모바일 플립 버튼 */}
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-sm font-bold text-foreground">
-              {currentPage + 1} <span className="text-muted-foreground font-normal text-xs">/ {currentImages.length}</span>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-bold text-gray-200 font-mono">
+              {currentPage + 1} <span className="text-gray-500 font-normal tracking-wider">/ {currentImages.length}</span>
             </span>
 
             {isMobile && viewMode === 'flip' && (
               <div className="flex gap-2">
-                <Button variant="secondary" size="sm" onClick={prevPage} disabled={currentPage === 0} className="h-8 px-3">
+                <Button variant="outline" size="sm" onClick={prevPage} disabled={currentPage === 0} className="h-8 px-3 bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white">
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button variant="secondary" size="sm" onClick={nextPage} disabled={currentPage >= currentImages.length - 1} className="h-8 px-3">
+                <Button variant="outline" size="sm" onClick={nextPage} disabled={currentPage >= currentImages.length - 1} className="h-8 px-3 bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white">
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
             )}
 
-            <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="hidden sm:flex items-center gap-2 text-xs text-gray-400">
               <Grid3X3 className="h-3 w-3" />
               {viewMode === 'flip' ? '화살표 키로 이동' : '스크롤하여 보기'}
             </div>
           </div>
 
           {/* 썸네일 바 - 모바일에서도 잘 보이게 */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+          <div className="flex items-center space-x-3 overflow-x-auto pb-2 scrollbar-hide -mx-2 px-2">
             {currentImages.map((item: any, index: number) => (
               <button
                 key={isSplitView ? index : item.id}
                 onClick={() => goToPage(index)}
-                className={cn(
-                  "relative flex-shrink-0 transition-all rounded-md overflow-hidden",
-                  currentPage === index
-                    ? 'ring-2 ring-primary ring-offset-1 scale-105'
-                    : 'opacity-60 hover:opacity-100'
-                )}
+                className={`group relative flex-shrink-0 transition-all duration-300 rounded-lg overflow-hidden ${currentPage === index
+                  ? 'ring-2 ring-primary ring-offset-2 ring-offset-[#18181b] scale-[1.05] shadow-[0_0_15px_rgba(139,92,246,0.3)]'
+                  : 'opacity-50 hover:opacity-100'
+                  }`}
               >
                 <img
                   src={isSplitView ? (item.student?.content_url || item.teacher?.content_url) : item.content_url}
                   alt={`Page ${index + 1}`}
-                  className="w-10 h-14 sm:w-12 sm:h-16 object-cover"
+                  className="w-14 h-20 sm:w-16 sm:h-24 object-cover border border-white/10"
                 />
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent text-white text-[9px] text-center py-0.5 font-medium">
+                <div className={`absolute bottom-0 inset-x-0 h-1/2 bg-gradient-to-t from-black/80 to-transparent transition-opacity ${currentPage === index ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                <div className={`absolute bottom-1 w-full text-center text-[10px] sm:text-xs font-medium text-white transition-opacity ${currentPage === index ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                   {index + 1}
                 </div>
                 {isSplitView && item.teacher && item.student && (
-                  <div className="absolute top-0.5 right-0.5 bg-primary w-1.5 h-1.5 rounded-full border border-white" />
+                  <div className="absolute top-1 right-1 bg-amber-500 w-2 h-2 rounded-full ring-2 ring-[#18181b] shadow-sm animate-pulse" />
                 )}
               </button>
             ))}

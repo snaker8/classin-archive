@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic'
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch'
 import { Class, Material } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
+import { motion } from 'framer-motion'
 import {
   ChevronLeft,
   ChevronRight,
@@ -70,6 +71,8 @@ const VisibleImage = ({ src, index }: { src: string; index: number }) => {
           alt={`Page ${index + 1}`}
           className="w-full h-auto"
           loading="eager" // Managed by JS, so load eagerly when mounted
+          onContextMenu={(e) => e.preventDefault()}
+          onDragStart={(e) => e.preventDefault()}
         />
       ) : (
         <div className="flex items-center justify-center p-20 text-gray-300">
@@ -126,6 +129,8 @@ const Page = ({ imageUrl, pageNumber }: { imageUrl: string; pageNumber: number }
                 onLoad={() => setImageLoaded(true)}
                 onError={() => setImageError(true)}
                 style={{ display: imageLoaded && !imageError ? 'block' : 'none' }}
+                onContextMenu={(e) => e.preventDefault()}
+                onDragStart={(e) => e.preventDefault()}
               />
             </TransformComponent>
 
@@ -182,6 +187,9 @@ export default function ViewerPage() {
   const [loading, setLoading] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [activeVideo, setActiveVideo] = useState<string | null>(null)
+  const [videoWidth, setVideoWidth] = useState(400)
+  const [isVideoDragging, setIsVideoDragging] = useState(false)
   const flipBookRef = useRef<any>(null)
 
   // SSR-safe responsive detection
@@ -230,18 +238,21 @@ export default function ViewerPage() {
     }
   }
 
-  const studentImages = materials.filter(m => m.type === 'blackboard_image')
-  const teacherImages = materials.filter(m => m.type === 'teacher_blackboard_image')
+  const studentImages = materials.filter(m => m.type === 'blackboard_image' && !m.title?.startsWith('[T]'))
+  const teacherImages = materials.filter(m => m.type === 'blackboard_image' && m.title?.startsWith('[T]'))
   const videos = materials.filter(m => m.type === 'video_link')
 
   const [boardMode, setBoardMode] = useState<'student' | 'teacher' | 'compare'>('student')
 
-  // Auto-switch to teacher mode if only teacher images exist
+  // Auto-switch modes based on available content
   useEffect(() => {
     if (studentImages.length === 0 && teacherImages.length > 0) {
       setBoardMode('teacher')
+    } else if (studentImages.length > 0 && teacherImages.length > 0) {
+      // If both exist, default to compare mode for the best UX
+      setBoardMode('compare')
     }
-  }, [materials])
+  }, [materials.length]) // Use length as trigger for simplicity after sets
 
   // In compare mode, we use the larger length to determine pages
   const images = boardMode === 'student' ? studentImages
@@ -317,9 +328,9 @@ export default function ViewerPage() {
           <p className="text-muted-foreground mb-6">
             {errorMsg}
           </p>
-          <Button onClick={() => router.push('/admin/dashboard')}>
+          <Button onClick={() => router.back()}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            대시보드로 돌아가기
+            이전 페이지로 돌아가기
           </Button>
         </div>
       </div>
@@ -335,9 +346,9 @@ export default function ViewerPage() {
           <p className="text-muted-foreground mb-6">
             선생님께서 자료를 업로드하면 여기에 표시됩니다.
           </p>
-          <Button onClick={() => router.push('/student/dashboard')}>
+          <Button onClick={() => router.back()}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            대시보드로 돌아가기
+            이전 페이지로 돌아가기
           </Button>
         </div>
       </div>
@@ -359,17 +370,23 @@ export default function ViewerPage() {
   const showTwoPages = !isMobile && images.length > 1
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-gray-900 to-gray-800 flex flex-col">
+    <div className="fixed inset-0 bg-[#0f0f13] text-gray-100 flex flex-col font-sans selection:bg-primary/30">
+      {/* Dynamic Background Effect */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[120px] opacity-50 mix-blend-screen" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/20 rounded-full blur-[120px] opacity-30 mix-blend-screen" />
+      </div>
+
       {/* Header */}
 
-      <header className="bg-gray-800/95 backdrop-blur-sm text-white px-4 py-3 border-b border-gray-700 z-50">
+      <header className="relative bg-[#18181b]/80 backdrop-blur-xl px-4 py-3 border-b border-white/10 z-50 shadow-sm">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.push('/student/dashboard')}
-              className="text-white hover:text-white hover:bg-gray-700"
+              onClick={() => router.back()}
+              className="text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
               뒤로
@@ -387,33 +404,33 @@ export default function ViewerPage() {
 
           <div className="flex items-center space-x-2">
             {(studentImages.length > 0 && teacherImages.length > 0) && (
-              <div className="flex bg-gray-700/50 rounded-lg p-1 mr-4 border border-gray-600">
+              <div className="flex bg-[#27272a]/80 backdrop-blur-md rounded-full p-1 mr-4 border border-white/5 shadow-inner">
                 <button
                   onClick={() => setBoardMode('student')}
-                  className={`px-3 py-1 text-sm rounded-md transition-all ${boardMode === 'student'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-gray-300 hover:text-white'
+                  className={`px-4 py-1.5 text-xs font-medium rounded-full transition-all duration-300 ${boardMode === 'student'
+                    ? 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.2)]'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                     }`}
                 >
                   학생
                 </button>
                 <button
-                  onClick={() => setBoardMode('teacher')}
-                  className={`px-3 py-1 text-sm rounded-md transition-all ${boardMode === 'teacher'
-                    ? 'bg-amber-600 text-white shadow-sm'
-                    : 'text-gray-300 hover:text-white'
-                    }`}
-                >
-                  선생님
-                </button>
-                <button
                   onClick={() => setBoardMode('compare')}
-                  className={`px-3 py-1 text-sm rounded-md transition-all ${boardMode === 'compare'
-                    ? 'bg-purple-600 text-white shadow-sm' // Purple for compare
-                    : 'text-gray-300 hover:text-white'
+                  className={`px-4 py-1.5 text-xs font-medium rounded-full transition-all duration-300 mx-1 ${boardMode === 'compare'
+                    ? 'bg-primary/20 text-primary-300 ring-1 ring-primary/50 shadow-[0_0_15px_rgba(139,92,246,0.2)]'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
                     }`}
                 >
                   비교
+                </button>
+                <button
+                  onClick={() => setBoardMode('teacher')}
+                  className={`px-4 py-1.5 text-xs font-medium rounded-full transition-all duration-300 ${boardMode === 'teacher'
+                    ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.2)]'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                    }`}
+                >
+                  선생님
                 </button>
               </div>
             )}
@@ -423,7 +440,7 @@ export default function ViewerPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => setViewMode(prev => prev === 'flip' ? 'scroll' : 'flip')}
-                className="text-white hover:text-white hover:bg-gray-700 border border-gray-600 mr-2"
+                className="text-gray-300 hover:text-white hover:bg-white/10 border border-white/10 mr-2 rounded-full"
               >
                 {viewMode === 'flip' ? '📜 스크롤 보기' : '📖 책 넘김 보기'}
               </Button>
@@ -432,20 +449,21 @@ export default function ViewerPage() {
             {videos.length > 0 && (
               <Button
                 size="sm"
-                onClick={() => window.open(videos[0].content_url, '_blank')}
-                className="bg-red-600 hover:bg-red-700 text-white"
+                onClick={() => setActiveVideo(videos[0].content_url)}
+                className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-full group transition-all"
               >
-                <Play className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">{videos[0].title || '수업 영상'}</span>
-                <span className="sm:hidden">영상</span>
-                <ExternalLink className="h-3 w-3 ml-2" />
+                <div className="bg-red-500 rounded-full p-1 mr-2 group-hover:scale-110 transition-transform">
+                  <Play className="h-3 w-3 text-white fill-current" />
+                </div>
+                <span className="hidden sm:inline font-medium">{videos[0].title || '수업 영상'}</span>
+                <span className="sm:hidden font-medium">영상</span>
               </Button>
             )}
             <Button
               variant="ghost"
               size="sm"
               onClick={toggleFullscreen}
-              className="text-white hover:text-white hover:bg-gray-700 hidden sm:flex"
+              className="text-gray-400 hover:text-white hover:bg-white/10 hidden sm:flex rounded-full px-2"
             >
               <Maximize2 className="h-4 w-4" />
             </Button>
@@ -466,7 +484,7 @@ export default function ViewerPage() {
               <p className="text-gray-400 mb-6">이 수업은 칠판 판서 없이 동영상으로만 구성되어 있습니다.</p>
               <Button
                 size="lg"
-                onClick={() => window.open(videos[0].content_url, '_blank')}
+                onClick={() => setActiveVideo(videos[0].content_url)}
                 className="bg-red-600 hover:bg-red-700 text-white text-lg px-8 py-6 h-auto"
               >
                 <Play className="h-6 w-6 mr-3" />
@@ -476,39 +494,49 @@ export default function ViewerPage() {
             </div>
           ) : boardMode === 'compare' ? (
             // COMPARE VIEW (Split Screen)
-            <div className="w-full h-full flex flex-col md:flex-row gap-4 overflow-hidden">
+            <div className="w-full h-full flex flex-col md:flex-row gap-6 overflow-hidden max-w-[1800px] mx-auto">
               {/* Left/Top: Student */}
-              <div className="flex-1 flex flex-col bg-black/20 rounded-xl overflow-hidden border border-white/10">
-                <div className="p-2 bg-blue-600/20 text-blue-200 text-center text-sm font-bold border-b border-white/10">
+              <div className="flex-1 flex flex-col bg-[#18181b]/60 backdrop-blur-md rounded-2xl overflow-hidden border border-white/5 shadow-2xl relative">
+                <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-blue-500/40 to-blue-400/10" />
+                <div className="p-3 bg-blue-500/5 text-blue-300 text-center text-sm font-semibold border-b border-white/5 flex items-center justify-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
                   학생 판서
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-hide">
                   {studentImages.map((image, index) => (
-                    <div key={image.id} className="w-full" id={`student-page-${index}`}>
-                      <div className="mb-1 text-xs text-gray-400">Page {index + 1}</div>
+                    <div key={image.id} className="w-full bg-[#1e1e24] p-2 rounded-xl border border-white/5 shadow-inner" id={`student-page-${index}`}>
+                      <div className="mb-2 px-1 text-xs text-gray-500 font-medium tracking-wide font-mono">Page {index + 1}</div>
                       <VisibleImage src={image.content_url} index={index} />
                     </div>
                   ))}
                   {studentImages.length === 0 && (
-                    <div className="h-full flex items-center justify-center text-gray-500">자료 없음</div>
+                    <div className="h-full flex items-center justify-center flex-col text-gray-600 gap-3">
+                      <div className="p-4 rounded-full bg-white/5"><Loader2 className="h-6 w-6 animate-pulse" /></div>
+                      <span>자료 없음</span>
+                    </div>
                   )}
                 </div>
               </div>
 
               {/* Right/Bottom: Teacher */}
-              <div className="flex-1 flex flex-col bg-black/20 rounded-xl overflow-hidden border border-white/10">
-                <div className="p-2 bg-amber-600/20 text-amber-200 text-center text-sm font-bold border-b border-white/10">
+              <div className="flex-1 flex flex-col bg-[#18181b]/60 backdrop-blur-md rounded-2xl overflow-hidden border border-white/5 shadow-2xl relative">
+                <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-amber-500/40 to-amber-400/10" />
+                <div className="p-3 bg-amber-500/5 text-amber-300 text-center text-sm font-semibold border-b border-white/5 flex items-center justify-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
                   선생님 판서
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-hide">
                   {teacherImages.map((image, index) => (
-                    <div key={image.id} className="w-full" id={`teacher-page-${index}`}>
-                      <div className="mb-1 text-xs text-gray-400">Page {index + 1}</div>
+                    <div key={image.id} className="w-full bg-[#1e1e24] p-2 rounded-xl border border-white/5 shadow-inner" id={`teacher-page-${index}`}>
+                      <div className="mb-2 px-1 text-xs text-gray-500 font-medium tracking-wide font-mono">Page {index + 1}</div>
                       <VisibleImage src={image.content_url} index={index} />
                     </div>
                   ))}
                   {teacherImages.length === 0 && (
-                    <div className="h-full flex items-center justify-center text-gray-500">자료 없음</div>
+                    <div className="h-full flex items-center justify-center flex-col text-gray-600 gap-3">
+                      <div className="p-4 rounded-full bg-white/5"><Loader2 className="h-6 w-6 animate-pulse" /></div>
+                      <span>자료 없음</span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -586,7 +614,7 @@ export default function ViewerPage() {
       </main>
 
       {/* Footer Controls */}
-      <footer className="bg-gray-800/95 backdrop-blur-sm text-white px-4 py-3 border-t border-gray-700 z-50">
+      <footer className="relative bg-[#18181b]/80 backdrop-blur-xl px-4 py-3 border-t border-white/10 z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.1)]">
         <div className="max-w-7xl mx-auto">
           {/* Page Counter */}
           <div className="flex items-center justify-between mb-3">
@@ -633,22 +661,25 @@ export default function ViewerPage() {
 
           {/* Thumbnail Navigation */}
           {boardMode !== 'compare' && (
-            <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
+            <div className="flex items-center space-x-3 overflow-x-auto pb-2 scrollbar-hide -mx-2 px-2">
               {images.map((image, index) => (
                 <button
                   key={image.id}
                   onClick={() => goToPage(index)}
-                  className={`relative flex-shrink-0 transition-all ${currentPage === index
-                    ? 'ring-2 ring-primary scale-110'
-                    : 'opacity-60 hover:opacity-100'
+                  className={`group relative flex-shrink-0 transition-all duration-300 rounded-lg overflow-hidden ${currentPage === index
+                    ? 'ring-2 ring-primary ring-offset-2 ring-offset-[#18181b] scale-[1.05] shadow-[0_0_15px_rgba(139,92,246,0.3)]'
+                    : 'opacity-50 hover:opacity-100'
                     }`}
                 >
                   <img
                     src={image.content_url}
                     alt={`Page ${index + 1}`}
-                    className="w-12 h-16 sm:w-16 sm:h-20 object-cover rounded border-2 border-gray-600"
+                    className="w-14 h-20 sm:w-16 sm:h-24 object-cover border border-white/10"
+                    onContextMenu={(e) => e.preventDefault()}
+                    onDragStart={(e) => e.preventDefault()}
                   />
-                  <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs text-center py-0.5">
+                  <div className={`absolute bottom-0 inset-x-0 h-1/2 bg-gradient-to-t from-black/80 to-transparent transition-opacity ${currentPage === index ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                  <div className={`absolute bottom-1 w-full text-center text-[10px] sm:text-xs font-medium text-white transition-opacity ${currentPage === index ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                     {index + 1}
                   </div>
                 </button>
@@ -673,6 +704,115 @@ export default function ViewerPage() {
           -ms-overflow-style: none;
         }
       `}</style>
+      {/* Floating Video Player */}
+      {activeVideo && (
+        <motion.div
+          drag
+          dragMomentum={false}
+          onDragStart={() => setIsVideoDragging(true)}
+          onDragEnd={() => setIsVideoDragging(false)}
+          initial={{ opacity: 0, y: 50, scale: 0.9 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.9 }}
+          style={{ touchAction: "none", width: videoWidth }}
+          className="group fixed top-20 left-[calc(100%-420px)] z-[100] bg-gray-900 rounded-xl shadow-2xl border border-gray-700 overflow-hidden flex flex-col"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 bg-[#18181b]/95 backdrop-blur-md border-b border-white/10 cursor-move">
+            <span className="text-xs font-semibold text-gray-200 flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+              동영상 강의
+            </span>
+            <button
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              onClick={() => setActiveVideo(null)}
+              className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+          {/* Body */}
+          <div
+            className="relative pt-[56.25%] w-full bg-black group"
+            onPointerDownCapture={(e) => e.stopPropagation()}
+          >
+            {(() => {
+              const isYouTube = activeVideo.includes('youtube.com') || activeVideo.includes('youtu.be');
+              let embedUrl = activeVideo;
+              if (isYouTube) {
+                const videoId = activeVideo.includes('v=')
+                  ? activeVideo.split('v=')[1].split('&')[0]
+                  : activeVideo.split('/').pop()?.split('?')[0];
+                embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0`;
+              }
+
+              return isYouTube ? (
+                <iframe
+                  src={embedUrl}
+                  className="absolute top-0 left-0 w-full h-full outline-none"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : (
+                <video
+                  src={activeVideo}
+                  controls
+                  controlsList="nodownload"
+                  onContextMenu={(e) => e.preventDefault()}
+                  className="absolute top-0 left-0 w-full h-full outline-none"
+                  autoPlay
+                />
+              );
+            })()}
+            {/* Overlay to prevent iframe from swallowing pointer events during drag or resize */}
+            {isVideoDragging && <div className="absolute inset-0 z-10" />}
+          </div>
+
+          {/* Resize Handle (Bottom-Right) */}
+          <div
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+
+              const target = e.currentTarget;
+              target.setPointerCapture(e.pointerId);
+
+              const startX = e.clientX;
+              const startY = e.clientY;
+              const startWidth = videoWidth;
+              const aspectRatio = 9 / 16; // Height is 56.25% of width
+              const diagonalSq = 1 + aspectRatio * aspectRatio;
+
+              const onPointerMove = (moveEvent: PointerEvent) => {
+                const deltaX = moveEvent.clientX - startX;
+                const deltaY = moveEvent.clientY - startY;
+
+                // Project mouse movement exactly onto the 16:9 diagonal
+                const projection = (deltaX * 1 + deltaY * aspectRatio) / diagonalSq;
+
+                const newWidth = Math.max(250, Math.min(window.innerWidth * 0.9, startWidth + projection));
+                setVideoWidth(newWidth);
+              };
+
+              const onPointerUp = (upEvent: PointerEvent) => {
+                target.releasePointerCapture(upEvent.pointerId);
+                target.removeEventListener('pointermove', onPointerMove);
+                target.removeEventListener('pointerup', onPointerUp);
+                document.body.style.userSelect = '';
+              };
+
+              document.body.style.userSelect = 'none';
+              target.addEventListener('pointermove', onPointerMove);
+              target.addEventListener('pointerup', onPointerUp);
+            }}
+            className="absolute bottom-0 right-0 w-8 h-8 cursor-se-resize z-50 flex items-end justify-end p-1.5 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity bg-black/30 hover:bg-black/60 rounded-tl-lg rounded-br-xl touch-none"
+          >
+            <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 2L2 10M10 6L6 10" />
+            </svg>
+          </div>
+        </motion.div>
+      )}
     </div>
   )
 }
