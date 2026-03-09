@@ -62,19 +62,34 @@ export default function SettingsPage() {
         loadPageData()
     }, [])
 
+    const [configSaved, setConfigSaved] = useState(false)
+
     const handleSaveConfig = async () => {
         setIsSavingConfig(true)
+        setConfigSaved(false)
         try {
             const res = await fetch('/api/admin/system/monitor-config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(monitorConfig)
             })
-            if (res.ok) {
-                toast({ title: "저장 완료", description: "모니터 폴더 설정이 저장되었습니다." })
-            } else {
-                throw new Error('Failed to save')
+            if (!res.ok) {
+                const data = await res.json()
+                throw new Error(data.error || 'Failed to save')
             }
+
+            // 저장 후 다시 불러와서 확인
+            const verifyRes = await fetch('/api/admin/system/monitor-config')
+            if (verifyRes.ok) {
+                const savedData = await verifyRes.json()
+                setMonitorConfig(savedData)
+            }
+
+            setConfigSaved(true)
+            toast({ title: "✅ 저장 완료", description: `모니터 폴더 ${monitorConfig.watchDirs.length}개 설정이 서버에 저장되었습니다.` })
+
+            // 3초 후 체크표시 제거
+            setTimeout(() => setConfigSaved(false), 3000)
         } catch (err: any) {
             toast({ title: "저장 실패", description: err.message, variant: "destructive" })
         } finally {
@@ -283,10 +298,24 @@ export default function SettingsPage() {
                                 </div>
                             )}
 
-                            <div className="flex justify-end pt-4">
-                                <Button onClick={handleSaveConfig} disabled={isSavingConfig}>
-                                    {isSavingConfig && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    설정 저장
+                            <div className="flex items-center justify-between pt-4 border-t">
+                                <p className="text-xs text-muted-foreground">
+                                    {monitorConfig.watchDirs.length > 0
+                                        ? `${monitorConfig.watchDirs.length}개 폴더 등록됨`
+                                        : '등록된 폴더 없음'}
+                                </p>
+                                <Button
+                                    onClick={handleSaveConfig}
+                                    disabled={isSavingConfig}
+                                    className={configSaved ? 'bg-green-600 hover:bg-green-600' : ''}
+                                >
+                                    {isSavingConfig ? (
+                                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 저장 중...</>
+                                    ) : configSaved ? (
+                                        <><CheckCircle2 className="mr-2 h-4 w-4" /> 저장 완료!</>
+                                    ) : (
+                                        '설정 저장'
+                                    )}
                                 </Button>
                             </div>
                         </div>
