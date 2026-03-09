@@ -69,8 +69,8 @@ export async function signIn(email: string, password: string) {
   // 로그인 성공 시 즉시 쿠키 설정 (미들웨어 인증용)
   if (typeof window !== 'undefined' && data.session) {
     const Cookies = (await import('js-cookie')).default
-    Cookies.set('sb-access-token', data.session.access_token, { expires: 7, path: '/', secure: true, sameSite: 'strict' })
-    Cookies.set('sb-refresh-token', data.session.refresh_token, { expires: 7, path: '/', secure: true, sameSite: 'strict' })
+    Cookies.set('sb-access-token', data.session.access_token, { expires: 7, path: '/', sameSite: 'lax' })
+    Cookies.set('sb-refresh-token', data.session.refresh_token, { expires: 7, path: '/', sameSite: 'lax' })
   }
 
   return data
@@ -112,8 +112,8 @@ if (typeof window !== 'undefined') {
   import('js-cookie').then((Cookies) => {
     supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        Cookies.default.set('sb-access-token', session.access_token, { expires: 7, path: '/', secure: true, sameSite: 'strict' })
-        Cookies.default.set('sb-refresh-token', session.refresh_token, { expires: 7, path: '/', secure: true, sameSite: 'strict' })
+        Cookies.default.set('sb-access-token', session.access_token, { expires: 7, path: '/', sameSite: 'lax' })
+        Cookies.default.set('sb-refresh-token', session.refresh_token, { expires: 7, path: '/', sameSite: 'lax' })
       } else {
         Cookies.default.remove('sb-access-token', { path: '/' })
         Cookies.default.remove('sb-refresh-token', { path: '/' })
