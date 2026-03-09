@@ -72,14 +72,29 @@ export default function TeacherBoardsPage() {
     const [distributeGroup, setDistributeGroup] = useState('all')
     const [distributing, setDistributing] = useState(false)
 
+    // Filter State
+    const [searchTerm, setSearchTerm] = useState('')
+    const [filterTeacher, setFilterTeacher] = useState('all')
+
     useEffect(() => {
         loadData()
-    }, [])
+    }, [filterTeacher]) // Reload on teacher filter change
+
+    // Debounced search effect
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            loadData()
+        }, 500)
+        return () => clearTimeout(timer)
+    }, [searchTerm])
 
     async function loadData() {
         setLoading(true)
         const [boardsRes, groupsRes, teachersRes] = await Promise.all([
-            getTeacherMasterBoards(),
+            getTeacherMasterBoards(1, 100, {
+                searchTerm,
+                teacherId: filterTeacher
+            }),
             getGroups(),
             getTeachers()
         ])
@@ -136,9 +151,23 @@ export default function TeacherBoardsPage() {
         setDistributing(false)
     }
 
+    async function handleDelete(boardId: string) {
+        if (!confirm('이 칠판 자료를 보관함에서 삭제하시겠습니까?')) return
+
+        const { deleteTeacherMasterBoard } = await import('@/app/actions/teacher')
+        const res = await deleteTeacherMasterBoard(boardId)
+
+        if (res.success) {
+            toast({ title: '삭제 완료', description: '보관함에서 자료가 삭제되었습니다.' })
+            loadData()
+        } else {
+            toast({ title: '삭제 실패', description: res.error, variant: 'destructive' })
+        }
+    }
+
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center space-x-4">
                     <Button variant="ghost" size="sm" onClick={() => router.push('/admin/teachers')}>
                         <ArrowLeft className="h-4 w-4 mr-2" />
@@ -226,6 +255,33 @@ export default function TeacherBoardsPage() {
                 </Dialog>
             </div>
 
+            {/* Filter Bar */}
+            <Card className="bg-muted/30 border-none shadow-none">
+                <CardContent className="p-4 flex flex-col md:flex-row gap-4">
+                    <div className="flex-1">
+                        <Input
+                            placeholder="파일명 또는 토픽 검색..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="bg-white"
+                        />
+                    </div>
+                    <div className="w-full md:w-64">
+                        <Select value={filterTeacher} onValueChange={setFilterTeacher}>
+                            <SelectTrigger className="bg-white">
+                                <SelectValue placeholder="모든 선생님" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">모든 선생님</SelectItem>
+                                {teachers.map(t => (
+                                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </CardContent>
+            </Card>
+
             {loading ? (
                 <div className="text-center py-12">
                     <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
@@ -297,7 +353,10 @@ export default function TeacherBoardsPage() {
                                                 <Send className="w-4 h-4 mr-2" />
                                                 수업에 배포
                                             </DropdownMenuItem>
-                                            <DropdownMenuItem className="text-destructive">
+                                            <DropdownMenuItem
+                                                className="text-destructive"
+                                                onClick={() => handleDelete(board.id)}
+                                            >
                                                 삭제
                                             </DropdownMenuItem>
                                         </DropdownMenuContent>

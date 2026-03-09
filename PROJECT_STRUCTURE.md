@@ -109,7 +109,7 @@ classin-archive/
 - 최근 수업 목록
 - 학생 목록 및 빠른 수업 추가
 
-#### `app/admin/classes/new/page.tsx`
+#### `app/admin/groups/new/page.tsx`
 - 수업 업로드 페이지
 - 기능:
   - 학생 선택

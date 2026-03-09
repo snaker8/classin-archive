@@ -1,13 +1,14 @@
 {
   "watchDirs": [
-    "D:\\OneDrive\\Documents\\과사람 의대관\\학습보고서 학생 칠판 파일",
-    "D:\\OneDrive\\M1",
-    "D:\\OneDrive\\M2",
-    "D:\\OneDrive\\M3",
-    "D:\\OneDrive\\M4",
-    "D:\\OneDrive\\M5",
-    "D:\\OneDrive\\M6",
-    "D:\\OneDrive\\M7",
-    "D:\\OneDrive\\M8"
-  ]
+    {
+      "center": "동래 의대관",
+      "path": "D:\\OneDrive\\동래 의대관 클래스인 강의실"
+    },
+    {
+      "center": "동부산",
+      "path": "D:\\OneDrive\\동부산 강의실"
+    }
+  ],
+  "autoUploadImages": false,
+  "autoUploadVideos": true
 }

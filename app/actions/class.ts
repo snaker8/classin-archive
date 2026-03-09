@@ -2,7 +2,8 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { unstable_noStore as noStore } from 'next/cache'
-
+import { cookies } from 'next/headers'
+import { getServerSession, requireRole, requireCenterAccess } from '@/lib/supabase/server'
 
 // Helper to generate signed URL
 async function signStorageUrl(url: string) {
@@ -54,50 +55,86 @@ async function signStorageUrl(url: string) {
 }
 
 // Improved helper that handles various URL formats or raw paths
-async function getSignedUrlForMaterial(material: any) {
-    if (
-        (material.type !== 'blackboard_image' && material.type !== 'teacher_blackboard_image') ||
-        !material.content_url
-    ) {
-        return material.content_url;
-    }
+async function getSignedUrlsForMaterials(materials: any[]) {
+    if (!materials || materials.length === 0) return [];
 
-    // 1. If it's already a full URL, try to extract path
-    // folder-monitor.js stores: content_url: publicUrlData.publicUrl
-    // which looks like: https://project.supabase.co/storage/v1/object/public/blackboard-images/path/to/file
-
-    const url = material.content_url;
     const bucketName = 'blackboard-images';
-    const publicMarker = `/storage/v1/object/public/${bucketName}/`;
+    const markers = [
+        `/storage/v1/object/public/${bucketName}/`,
+        `/storage/v1/object/authenticated/${bucketName}/`,
+        `/public/${bucketName}/`,
+        `/authenticated/${bucketName}/`
+    ];
 
-    let storagePath = url;
-    if (url.includes(publicMarker)) {
-        storagePath = url.split(publicMarker)[1];
-    }
+    const pathsToSign: string[] = [];
+    const materialMap: Record<string, number[]> = {};
 
-    if (storagePath === url) {
-        // Try checking if it's just the path stored (legacy or different upload)
-        // If it doesn't look like a URL, treat as path
-        if (url.startsWith('http')) {
-            return url; // Cannot extract path, return original
+    materials.forEach((m: any, idx: number) => {
+        if (!m.content_url || (m.type !== 'blackboard_image' && m.type !== 'teacher_blackboard_image')) {
+            return;
         }
+
+        const url = m.content_url;
+        let storagePath = url;
+
+        for (const marker of markers) {
+            if (url.includes(marker)) {
+                storagePath = url.split(marker)[1];
+                break;
+            }
+        }
+
+        if (storagePath.startsWith('http') && storagePath.includes(bucketName)) {
+            const parts = storagePath.split(bucketName + '/');
+            if (parts.length > 1) storagePath = parts[1];
+        }
+
+        if (!storagePath.startsWith('http')) {
+            pathsToSign.push(storagePath);
+            if (!materialMap[storagePath]) materialMap[storagePath] = [];
+            materialMap[storagePath].push(idx);
+        }
+    });
+
+    if (pathsToSign.length === 0) return materials;
+
+    try {
+        const { data, error } = await supabaseAdmin
+            .storage
+            .from(bucketName)
+            .createSignedUrls(pathsToSign, 3600);
+
+        if (error) {
+            console.error('Batch sign error:', error);
+            return materials;
+        }
+
+        const newMaterials = [...materials];
+        data.forEach((item: any) => {
+            const path = item.path;
+            if (path) {
+                const indices = materialMap[path];
+                if (indices) {
+                    indices.forEach((idx: number) => {
+                        newMaterials[idx] = { ...newMaterials[idx], content_url: item.signedUrl };
+                    });
+                }
+            }
+        });
+
+        return newMaterials;
+    } catch (e) {
+        console.error('Batch sign catch error:', e);
+        return materials;
     }
-
-    // Now storagePath should be relative path in bucket
-    const { data, error } = await supabaseAdmin
-        .storage
-        .from(bucketName)
-        .createSignedUrl(storagePath, 60 * 60);
-
-    if (error || !data) return url;
-    return data.signedUrl;
 }
 
 
 export async function getClass(classId: string) {
     noStore()
     try {
-        // We can use supabaseAdmin directly to bypass RLS
+        const session = await getServerSession()
+        if (!session) return { error: '로그인이 필요합니다.' }
 
         // 1. Fetch Class
         const { data: classData, error: classError } = await supabaseAdmin
@@ -127,12 +164,8 @@ export async function getClass(classId: string) {
             return { error: `자료 조회 오류: ${materialsError.message}` }
         }
 
-        // 3. Sign URLs for images
-        const materialsWithSignedUrls = await Promise.all((materials || []).map(async (m) => ({
-            ...m,
-            content_url: await getSignedUrlForMaterial(m)
-        })));
-
+        // 3. Sign URLs for images (BATCHED)
+        const materialsWithSignedUrls = await getSignedUrlsForMaterials(materials || []);
 
         return {
             classInfo: classData,
@@ -145,20 +178,65 @@ export async function getClass(classId: string) {
 }
 
 
-export async function getAllClasses({ page = 1, limit = 20, search = '' } = {}) {
+export async function getAllClasses({ page = 1, limit = 20, search = '', date = '', teacherId = '' }: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    date?: string;
+    teacherId?: string;
+} = {}) {
     noStore()
     try {
+        await requireRole(['admin', 'manager', 'super_manager', 'teacher'])
+        const cookieStore = cookies()
+        const activeCenter = cookieStore.get('active_center')?.value
+
         let query = supabaseAdmin
             .from('classes')
             .select(`
-        *,
-        student:profiles!classes_student_id_fkey(*),
-        materials:materials(count)
-      `, { count: 'exact' })
+                *,
+                student:profiles!classes_student_id_fkey!inner(*),
+                materials:materials(count)
+            `, { count: 'exact' })
             .order('created_at', { ascending: false })
+
+        if (activeCenter && activeCenter !== '전체') {
+            query = query.eq('student.center', activeCenter)
+        }
 
         if (search) {
             query = query.ilike('title', `%${search}%`)
+        }
+
+        if (date) {
+            query = query.eq('class_date', date)
+        }
+
+        if (teacherId) {
+            // Fetch groups assigned to this teacher
+            const { data: groups } = await supabaseAdmin
+                .from('groups')
+                .select('id')
+                .eq('teacher_id', teacherId)
+
+            if (groups && groups.length > 0) {
+                const groupIds = groups.map((g: any) => g.id)
+
+                // Fetch students in these groups
+                const { data: members } = await supabaseAdmin
+                    .from('group_members')
+                    .select('student_id')
+                    .in('group_id', groupIds)
+
+                if (members && members.length > 0) {
+                    const studentIds = members.map((m: any) => m.student_id)
+                    query = query.in('student_id', studentIds)
+                } else {
+                    return { classes: [], count: 0 }
+                }
+            } else {
+                return { classes: [], count: 0 }
+            }
         }
 
         const from = (page - 1) * limit
@@ -181,7 +259,22 @@ export async function getAllClasses({ page = 1, limit = 20, search = '' } = {}) 
 export async function getStudentClasses(studentId: string) {
     noStore()
     try {
-        // 1. Fetch classes for student
+        const session = await getServerSession()
+        if (!session) return { error: '로그인이 필요합니다.' }
+
+        // 1. Security Check: Get target student's center
+        const { data: studentProfile, error: profileErr } = await supabaseAdmin
+            .from('profiles')
+            .select('center')
+            .eq('id', studentId)
+            .single()
+
+        if (profileErr || !studentProfile) throw new Error('학생 정보를 찾을 수 없습니다.')
+
+        // Ensure requester has access to this student's center
+        await requireCenterAccess(studentProfile.center)
+
+        // 2. Fetch classes for student
         const { data: classesData, error: classesError } = await supabaseAdmin
             .from('classes')
             .select('*')
@@ -197,7 +290,7 @@ export async function getStudentClasses(studentId: string) {
         // 2. Fetch materials for these classes (optimized)
         const { data: materialsData, error: materialsError } = await supabaseAdmin
             .from('materials')
-            .select('class_id, type, content_url, order_index')
+            .select('class_id, type, title, content_url, order_index')
             .in('class_id', classIds)
             .order('order_index', { ascending: true })
 
@@ -212,17 +305,11 @@ export async function getStudentClasses(studentId: string) {
             materialsByClass[material.class_id].push(material)
         })
 
-        // Process classes and SIGN THUMBNAILS
-        const processedClasses = await Promise.all(classesData.map(async (cls) => {
-            const materials = materialsByClass[cls.id] || []
-            const images = materials.filter(m => m.type === 'blackboard_image')
-            const videos = materials.filter(m => m.type === 'video_link')
-
-            // Get first image
-            let thumbnail = null;
-            if (images.length > 0) {
-                thumbnail = await getSignedUrlForMaterial(images[0]);
-            }
+        // Initial processing to group materials by class
+        const processedClasses = classesData.map((cls) => {
+            const allMaterials = materialsByClass[cls.id] || []
+            const images = allMaterials.filter(m => m.type === 'blackboard_image' || m.type === 'teacher_blackboard_image')
+            const videos = allMaterials.filter(m => m.type === 'video_link')
 
             // Calculate stats
             const today = new Date();
@@ -231,21 +318,74 @@ export async function getStudentClasses(studentId: string) {
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
             const isNew = diffDays <= 3;
 
-            // Material Count Logic:
-            // 1. Blackboard images (regardless of count) = 1 material
-            // 2. Video link = 1 material each
-            const materialCount = (images.length > 0 ? 1 : 0) + videos.length;
+            return {
+                ...cls,
+                material_count: allMaterials.length,
+                video_count: videos.length,
+                is_new: isNew,
+                materials: allMaterials
+            }
+        });
+
+        // 3. Batch Sign ONLY Thumbnails (Optimized Performance)
+        const thumbnailCandidates = processedClasses.map(cls => {
+            const images = cls.materials.filter((m: any) => m.type === 'blackboard_image' || m.type === 'teacher_blackboard_image');
+            const targetImg = images.find((m: any) => m.type === 'blackboard_image') ||
+                images.find((m: any) => m.type === 'teacher_blackboard_image' || (m.title && m.title.startsWith('[T]'))) ||
+                images[0];
+            return targetImg || null;
+        }).filter(Boolean);
+
+        const signedThumbnails = await getSignedUrlsForMaterials(thumbnailCandidates);
+        const signedThumbnailMap: Record<string, string> = {};
+        signedThumbnails.forEach((m: any) => {
+            // We need a way to link back. Let's use content_url as a temporary key if we can't find original.
+            // Actually, we can use idx mapping or just matching paths.
+        });
+
+        // Simpler way: map by path
+        const pathToSignedUrl: Record<string, string> = {};
+        signedThumbnails.forEach((st: any) => {
+            if (st.content_url) {
+                // Find matching original candidate to get its original content_url
+                const original = thumbnailCandidates.find((tc: any) => tc.content_url.includes(st.path) || st.content_url.includes(tc.content_url));
+                // This is bit fuzzy. Let's use indices.
+            }
+        });
+
+        // Better way: Just sign them directly and map back by index
+        const classesWithThumbnails = processedClasses.map((cls, idx) => {
+            const images = cls.materials.filter((m: any) => m.type === 'blackboard_image' || m.type === 'teacher_blackboard_image');
+            const targetImg = images.find((m: any) => m.type === 'blackboard_image') ||
+                images.find((m: any) => m.type === 'teacher_blackboard_image' || (m.title && m.title.startsWith('[T]'))) ||
+                images[0];
+
+            // We don't sign here yet.
+            return { ...cls, targetImg };
+        });
+
+        const targetsToSign = classesWithThumbnails.map(c => c.targetImg).filter(Boolean);
+        const signedTargets = await getSignedUrlsForMaterials(targetsToSign);
+
+        const finalClasses = classesWithThumbnails.map(cls => {
+            let thumbnail = cls.thumbnail_url;
+            if (cls.targetImg) {
+                const signed = signedTargets.find((st: any) =>
+                    st.content_url.includes(cls.targetImg.content_url) ||
+                    cls.targetImg.content_url.includes(st.content_url) ||
+                    (st.path && cls.targetImg.content_url.includes(st.path))
+                );
+                if (signed) thumbnail = signed.content_url;
+            }
 
             return {
                 ...cls,
                 thumbnail_url: thumbnail,
-                material_count: materialCount,
-                video_count: videos.length,
-                is_new: isNew
-            }
-        }));
+                materials: cls.materials // Still keep materials but unsigned for dashboard
+            };
+        });
 
-        return { classes: processedClasses }
+        return { classes: finalClasses }
 
     } catch (error: any) {
         console.error('Error in getStudentClasses:', error)
@@ -256,6 +396,7 @@ export async function getStudentClasses(studentId: string) {
 
 export async function deleteClass(classId: string) {
     try {
+        await requireRole(['admin', 'manager', 'super_manager', 'teacher'])
         const { error } = await supabaseAdmin
             .from('classes')
             .delete()
@@ -272,6 +413,7 @@ export async function deleteClass(classId: string) {
 
 export async function updateClass(classId: string, data: { title?: string; description?: string; class_date?: string }) {
     try {
+        await requireRole(['admin', 'manager', 'super_manager', 'teacher'])
         const { error } = await supabaseAdmin
             .from('classes')
             .update(data)
@@ -288,6 +430,7 @@ export async function updateClass(classId: string, data: { title?: string; descr
 
 export async function createClass(data: { student_id: string; title: string; description?: string; class_date: string }) {
     try {
+        await requireRole(['admin', 'manager', 'super_manager', 'teacher'])
         const { data: newClass, error } = await supabaseAdmin
             .from('classes')
             .insert(data)
@@ -304,6 +447,7 @@ export async function createClass(data: { student_id: string; title: string; des
 
 export async function createClassForGroup(groupId: string, data: { title: string; description?: string; class_date: string }) {
     try {
+        await requireRole(['admin', 'manager', 'super_manager', 'teacher'])
         // 1. Get all members of the group
         const { data: members, error: membersError } = await supabaseAdmin
             .from('group_members')
@@ -338,6 +482,7 @@ export async function createClassForGroup(groupId: string, data: { title: string
 
 export async function createMaterials(materials: any[]) {
     try {
+        await requireRole(['admin', 'manager', 'super_manager', 'teacher'])
         if (!materials || materials.length === 0) return { success: true, count: 0 };
 
         const { data, error } = await supabaseAdmin
@@ -356,6 +501,7 @@ export async function createMaterials(materials: any[]) {
 
 export async function uploadImage(formData: FormData) {
     try {
+        await requireRole(['admin', 'manager', 'super_manager', 'teacher'])
         const file = formData.get('file') as File
         const path = formData.get('path') as string
 

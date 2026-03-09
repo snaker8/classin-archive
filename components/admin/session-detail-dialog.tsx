@@ -8,12 +8,13 @@ import {
     DialogHeader,
     DialogTitle,
     DialogFooter,
+    DialogTrigger,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { FileText, Video, Link as LinkIcon, ExternalLink, Trash2, Plus, Loader2 } from 'lucide-react'
 import { getSessionDetails, addMaterialToSession, deleteMaterialFromSession } from '@/app/actions/group'
+import { FileText, Video, Link as LinkIcon, ExternalLink, Trash2, Plus, Loader2, Zap, FolderOpen } from 'lucide-react'
 
 interface SessionDetailDialogProps {
     open: boolean
@@ -21,6 +22,7 @@ interface SessionDetailDialogProps {
     session: {
         class_ids: string[]
         title: string
+        class_date?: string
     } | null
     onUpdate?: () => void
 }
@@ -58,10 +60,19 @@ export function SessionDetailDialog({ open, onOpenChange, session, onUpdate }: S
     }
 
     async function handleAdd() {
-        if (!title || !url) {
-            alert('제목과 링크를 입력해주세요.')
+        if (!title) {
+            alert('제목을 입력해주세요.')
             return
         }
+
+        if (type === 'ai_video') {
+            setIsAddOpen(false)
+            return
+        } else if (!url) {
+            alert('링크를 입력해주세요.')
+            return
+        }
+
         if (!session) return
 
         setIsSubmitting(true)
@@ -72,18 +83,16 @@ export function SessionDetailDialog({ open, onOpenChange, session, onUpdate }: S
                 url
             })
 
-            if (res.success) {
-                await loadMaterials()
-                setIsAddOpen(false)
-                setTitle('')
-                setUrl('')
-                if (onUpdate) onUpdate()
-            } else {
-                alert(res.error)
-            }
-        } catch (e) {
+            if (!res.success) throw new Error(res.error)
+
+            await loadMaterials()
+            setIsAddOpen(false)
+            setTitle('')
+            setUrl('')
+            if (onUpdate) onUpdate()
+        } catch (e: any) {
             console.error(e)
-            alert('실패했습니다.')
+            alert(e.message || '실패했습니다.')
         } finally {
             setIsSubmitting(false)
         }
@@ -108,6 +117,15 @@ export function SessionDetailDialog({ open, onOpenChange, session, onUpdate }: S
         } catch (e) {
             console.error(e)
         }
+    }
+
+    // Helper to format folder name
+    const getFolderName = () => {
+        if (!session) return ''
+        const datePart = session.class_date ? session.class_date.split('T')[0] : 'YYYY-MM-DD'
+        // Sanitize title for folder name (remove illegal chars)
+        const safeTitle = session.title.replace(/[\\/:*?"<>|]/g, '_')
+        return `${datePart} ${safeTitle}`
     }
 
     if (!session) return null
@@ -140,13 +158,19 @@ export function SessionDetailDialog({ open, onOpenChange, session, onUpdate }: S
                                                 material.type === 'link' ? <LinkIcon className="h-4 w-4" /> :
                                                     <FileText className="h-4 w-4" />}
                                         </div>
-                                        <div className="min-w-0">
-                                            <div className="font-medium truncate">{material.title}</div>
-                                            <div className="text-xs text-muted-foreground truncate opacity-70 flex items-center gap-1">
+                                        <div className="min-w-0 flex-1">
+                                            {(material.content_url || material.url) ? (
+                                                <a href={material.content_url || material.url} target="_blank" rel="noopener noreferrer" className="font-medium truncate hover:text-primary hover:underline cursor-pointer block">
+                                                    {material.title}
+                                                </a>
+                                            ) : (
+                                                <div className="font-medium truncate">{material.title}</div>
+                                            )}
+                                            <div className="text-xs text-muted-foreground truncate opacity-70 flex items-center gap-1 mt-0.5">
                                                 {material.type.toUpperCase()}
-                                                {material.url && (
-                                                    <a href={material.url} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-0.5 ml-1">
-                                                        Open <ExternalLink className="h-2 w-2" />
+                                                {(material.content_url || material.url) && (
+                                                    <a href={material.content_url || material.url} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-0.5 ml-1 text-primary">
+                                                        <ExternalLink className="h-3 w-3" />
                                                     </a>
                                                 )}
                                             </div>
@@ -171,8 +195,17 @@ export function SessionDetailDialog({ open, onOpenChange, session, onUpdate }: S
                         닫기
                     </Button>
 
-                    <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-                        <DialogContent>
+                    <Dialog open={isAddOpen} onOpenChange={(val) => {
+                        if (isSubmitting && !val) return
+                        setIsAddOpen(val)
+                    }}>
+                        <DialogTrigger asChild>
+                            <Button onClick={() => setIsAddOpen(true)}>
+                                <Plus className="mr-2 h-4 w-4" />
+                                자료 추가
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent onPointerDownOutside={(e) => isSubmitting && e.preventDefault()} onEscapeKeyDown={(e) => isSubmitting && e.preventDefault()}>
                             <DialogHeader>
                                 <DialogTitle>새 자료 추가</DialogTitle>
                             </DialogHeader>
@@ -195,31 +228,60 @@ export function SessionDetailDialog({ open, onOpenChange, session, onUpdate }: S
                                             <SelectItem value="link">웹 링크</SelectItem>
                                             <SelectItem value="video">동영상 (유튜브 등)</SelectItem>
                                             <SelectItem value="pdf">PDF 문서</SelectItem>
+                                            <SelectItem value="ai_video">✨ AI 복습 영상 (파일 업로드)</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>링크 (URL)</Label>
-                                    <Input
-                                        placeholder="https://..."
-                                        value={url}
-                                        onChange={(e) => setUrl(e.target.value)}
-                                    />
-                                </div>
+
+                                {type === 'ai_video' ? (
+                                    <div className="space-y-2">
+                                        <Label>영상 파일 저장 위치 안내</Label>
+                                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                                            <div className="flex items-start gap-3">
+                                                <div className="p-2 bg-blue-100 rounded-lg shrink-0">
+                                                    <FolderOpen className="h-5 w-5 text-blue-600" />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <h4 className="font-medium text-sm text-slate-900">자동 업로드 폴더</h4>
+                                                    <p className="text-xs text-slate-600 leading-relaxed">
+                                                        아래 경로에 동영상 파일을 저장하면 <strong>자동으로 감지하여 복습 영상으로 등록</strong>됩니다.
+                                                        <br />
+                                                        별도로 파일을 업로드할 필요가 없습니다.
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="bg-slate-900 text-slate-50 p-3 rounded-md font-mono text-xs break-all relative group">
+                                                D:\OneDrive\학원 클래스인 강의실\{getFolderName()}
+                                            </div>
+
+                                            <div className="flex items-center gap-2 text-[11px] text-amber-600 bg-amber-50 px-3 py-2 rounded border border-amber-100">
+                                                <Zap className="h-3.5 w-3.5" />
+                                                <span>파일이 저장되면 약 1-2분 내에 자동으로 처리됩니다.</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <Label>링크 주소 (URL)</Label>
+                                        <Input
+                                            placeholder="https://..."
+                                            value={url}
+                                            onChange={(e) => setUrl(e.target.value)}
+                                        />
+                                    </div>
+                                )}
                             </div>
                             <DialogFooter>
+                                <Button variant="ghost" onClick={() => setIsAddOpen(false)} disabled={isSubmitting}>
+                                    취소
+                                </Button>
                                 <Button onClick={handleAdd} disabled={isSubmitting}>
-                                    {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                                    추가하기
+                                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    {type === 'ai_video' ? '확인' : '추가하기'}
                                 </Button>
                             </DialogFooter>
                         </DialogContent>
-
-                        {/* Trigger button inside footer to open the nested dialog */}
-                        <Button onClick={() => setIsAddOpen(true)}>
-                            <Plus className="mr-2 h-4 w-4" />
-                            자료 추가
-                        </Button>
                     </Dialog>
                 </DialogFooter>
             </DialogContent>

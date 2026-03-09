@@ -161,6 +161,11 @@ export default function ViewerPage() {
 
   // 뷰 모드: 모바일은 scroll이 기본
   const [viewMode, setViewMode] = useState<'flip' | 'scroll'>('scroll')
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null)
+  const [viewContext, setViewContext] = useState<'student' | 'teacher' | 'compare'>('compare')
+  const [activeVideo, setActiveVideo] = useState<string | null>(null)
+  const [videoWidth, setVideoWidth] = useState(400)
+  const [isVideoDragging, setIsVideoDragging] = useState(false)
 
   useEffect(() => {
     const checkMobile = () => {
@@ -196,10 +201,11 @@ export default function ViewerPage() {
       const matList = materials || []
       setMaterials(matList)
 
-      // Auto-enable split view if teacher boards exist
+      // Auto-enable split view and compare mode if teacher boards exist
       const hasTeacherBoards = matList.some(m => m.type === 'teacher_blackboard_image' || m.title?.startsWith('[T]'))
       if (hasTeacherBoards) {
         setIsSplitView(true)
+        setViewContext('compare')
       }
     } catch (error: any) {
       console.error('Error loading class data:', error)
@@ -212,18 +218,19 @@ export default function ViewerPage() {
   const images = materials.filter(m => m.type === 'blackboard_image' || m.type === 'teacher_blackboard_image')
   const videos = materials.filter(m => m.type === 'video_link')
 
-  const groupedImages = images.reduce((acc, img) => {
-    const idx = img.order_index;
-    if (!acc[idx]) acc[idx] = { student: null, teacher: null };
-    if (img.type === 'teacher_blackboard_image' || img.title?.startsWith('[T]')) acc[idx].teacher = img;
-    else acc[idx].student = img;
-    return acc;
-  }, {} as Record<number, { student: Material | null, teacher: Material | null }>);
+  // Sequential Pairing Logic (More Robust)
+  const studentImages = images.filter(m => !(m.type === 'teacher_blackboard_image' || m.title?.startsWith('[T]')))
+    .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
 
-  const imageGroups = Object.keys(groupedImages)
-    .map(Number)
-    .sort((a, b) => a - b)
-    .map(idx => ({ index: idx, ...groupedImages[idx] }));
+  const teacherImages = images.filter(m => (m.type === 'teacher_blackboard_image' || m.title?.startsWith('[T]')))
+    .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+
+  const maxCount = Math.max(studentImages.length, teacherImages.length);
+  const imageGroups = Array.from({ length: maxCount }, (_, i) => ({
+    index: i,
+    student: studentImages[i] || null,
+    teacher: teacherImages[i] || null
+  }));
 
   const [isSplitView, setIsSplitView] = useState(false);
   const currentImages = isSplitView ? imageGroups : images;
@@ -336,7 +343,7 @@ export default function ViewerPage() {
   }
 
   const { width, height } = getBookDimensions()
-  const showTwoPages = !isMobile && currentImages.length > 1
+  const showTwoPages = !isMobile && (isSplitView || currentImages.length > 1)
 
   return (
     <div className="fixed inset-0 bg-[#0f0f13] text-gray-100 flex flex-col font-sans selection:bg-primary/30">
@@ -390,7 +397,46 @@ export default function ViewerPage() {
                 <span className="hidden sm:inline ml-1">분할</span>
               </Button>
 
-              {/* 뷰모드 - 모바일에서는 스크롤만 */}
+              {/* 보기 모드 전환 (학생 / 비교 / 선생님) - 데스크탑 헤더용 */}
+              {isSplitView && !isMobile && (
+                <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/10 mx-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setViewContext('student')}
+                    className={cn(
+                      "h-7 px-2.5 text-[10px] sm:text-xs font-medium transition-all",
+                      viewContext === 'student' ? "bg-white/15 text-white shadow-sm" : "text-gray-400 hover:text-gray-200"
+                    )}
+                  >
+                    학생
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setViewContext('compare')}
+                    className={cn(
+                      "h-7 px-2.5 text-[10px] sm:text-xs font-medium transition-all",
+                      viewContext === 'compare' ? "bg-primary/20 text-primary-300" : "text-gray-400 hover:text-gray-200"
+                    )}
+                  >
+                    비교
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setViewContext('teacher')}
+                    className={cn(
+                      "h-7 px-2.5 text-[10px] sm:text-xs font-medium transition-all",
+                      viewContext === 'teacher' ? "bg-white/15 text-white shadow-sm" : "text-gray-400 hover:text-gray-200"
+                    )}
+                  >
+                    선생님
+                  </Button>
+                </div>
+              )}
+
+              {/* 뷰모드 - 데스크탑 전용 */}
               {!isMobile && (
                 <Button
                   variant="outline"
@@ -410,7 +456,7 @@ export default function ViewerPage() {
               {videos.length > 0 && (
                 <Button
                   size="sm"
-                  onClick={() => window.open(videos[0].content_url, '_blank')}
+                  onClick={() => setActiveVideo(videos[0].content_url)}
                   className="h-8 px-2 sm:px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-full group transition-all text-xs"
                 >
                   <div className="bg-red-500 rounded-full p-0.5 mr-1 group-hover:scale-110 transition-transform">
@@ -434,12 +480,115 @@ export default function ViewerPage() {
         </div>
       </header>
 
+      {/* 모바일 전용 판서 전환 탭 바 */}
+      {isMobile && isSplitView && (
+        <div className="relative bg-[#1a1a1f]/95 backdrop-blur-xl z-40 border-b border-white/5">
+          <div className="flex">
+            <button
+              onClick={() => setViewContext('student')}
+              className={cn(
+                "flex-1 py-3 text-sm font-bold transition-all relative",
+                viewContext === 'student'
+                  ? "text-blue-400"
+                  : "text-gray-500 active:bg-white/5"
+              )}
+            >
+              <span className="flex items-center justify-center gap-2">
+                <span className={cn(
+                  "w-2 h-2 rounded-full transition-all",
+                  viewContext === 'student' ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]" : "bg-gray-600"
+                )} />
+                학생 판서
+              </span>
+              {viewContext === 'student' && (
+                <span className="absolute bottom-0 inset-x-4 h-[2px] bg-blue-500 rounded-full" />
+              )}
+            </button>
+            <button
+              onClick={() => setViewContext('compare')}
+              className={cn(
+                "flex-1 py-3 text-sm font-bold transition-all relative",
+                viewContext === 'compare'
+                  ? "text-violet-400"
+                  : "text-gray-500 active:bg-white/5"
+              )}
+            >
+              <span className="flex items-center justify-center gap-2">
+                <span className={cn(
+                  "w-2 h-2 rounded-full transition-all",
+                  viewContext === 'compare' ? "bg-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.6)]" : "bg-gray-600"
+                )} />
+                비교
+              </span>
+              {viewContext === 'compare' && (
+                <span className="absolute bottom-0 inset-x-4 h-[2px] bg-violet-500 rounded-full" />
+              )}
+            </button>
+            <button
+              onClick={() => setViewContext('teacher')}
+              className={cn(
+                "flex-1 py-3 text-sm font-bold transition-all relative",
+                viewContext === 'teacher'
+                  ? "text-amber-400"
+                  : "text-gray-500 active:bg-white/5"
+              )}
+            >
+              <span className="flex items-center justify-center gap-2">
+                <span className={cn(
+                  "w-2 h-2 rounded-full transition-all",
+                  viewContext === 'teacher' ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]" : "bg-gray-600"
+                )} />
+                선생님 판서
+              </span>
+              {viewContext === 'teacher' && (
+                <span className="absolute bottom-0 inset-x-4 h-[2px] bg-amber-500 rounded-full" />
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Zoom Modal */}
+      <AnimatePresence>
+        {zoomedImage && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out"
+            onClick={() => setZoomedImage(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative max-w-full max-h-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={zoomedImage}
+                alt="Zoomed"
+                className="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute -top-12 right-0 text-white hover:bg-white/10"
+                onClick={() => setZoomedImage(null)}
+              >
+                <X className="h-8 w-8" />
+              </Button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
 
       {/* 메인 컨텐츠 */}
       <main className="flex-1 overflow-hidden relative">
         {viewMode === 'scroll' ? (
           <div className="h-full overflow-y-auto">
-            <div className="p-3 sm:p-4 pb-32 space-y-4 max-w-4xl mx-auto">
+            <div className="p-2 sm:p-4 pb-32 space-y-4 max-w-7xl mx-auto">
               {isSplitView ? (
                 imageGroups.map((group, index) => (
                   <motion.div
@@ -452,48 +601,71 @@ export default function ViewerPage() {
                     <div className="bg-[#18181b]/60 backdrop-blur-md rounded-2xl overflow-hidden border border-white/5 shadow-2xl relative">
                       <div className="p-2.5 border-b border-white/5 bg-white/5 flex items-center justify-between">
                         <span className="text-xs font-bold text-gray-300 font-mono tracking-wide">PAGE {index + 1}</span>
-                        <span className="flex items-center gap-2 text-[10px] text-gray-500">
-                          분할 비교 모드
+                        <span className="flex items-center gap-2 text-[10px] text-gray-400">
+                          <Maximize2 className="h-3 w-3" /> 클릭하여 크게 보기
                         </span>
                       </div>
                       {/* 모바일: 세로 스택, 데스크탑: 가로 나란히 */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4">
-                        {/* Teacher Board */}
-                        <div className="flex flex-col bg-[#1e1e24] p-3 rounded-xl border border-white/5 shadow-inner">
-                          <div className="flex items-center gap-1.5 mb-3 bg-amber-500/10 w-fit px-2 py-1 rounded-md border border-amber-500/20">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                            <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">Teacher Board</span>
-                          </div>
-                          {group.teacher ? (
-                            <img src={group.teacher.content_url} className="w-full h-auto rounded-lg shadow-sm" alt="Teacher board" />
-                          ) : (
-                            <div className="flex-1 min-h-[120px] rounded-lg bg-white/5 border border-dashed border-white/10 flex items-center justify-center text-gray-500 text-xs">
-                              선생님 판서 없음
+                      <div className={cn(
+                        "grid gap-2 sm:gap-4 p-2 sm:p-4",
+                        viewContext === 'compare' ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"
+                      )}>
+                        {/* Student Board - Now on the LEFT */}
+                        {(viewContext === 'student' || viewContext === 'compare') && (
+                          <div className="flex flex-col bg-[#1e1e24] p-2 sm:p-3 rounded-xl border border-white/5 shadow-inner">
+                            <div className="flex items-center gap-2 mb-3 w-fit px-3 py-1 bg-blue-500/10 rounded-full border border-blue-500/20">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)]" />
+                              <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">학생 판서</span>
                             </div>
-                          )}
-                        </div>
-                        {/* Student Board */}
-                        <div className="flex flex-col bg-[#1e1e24] p-3 rounded-xl border border-white/5 shadow-inner">
-                          <div className="flex items-center gap-1.5 mb-3 bg-blue-500/10 w-fit px-2 py-1 rounded-md border border-blue-500/20">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                            <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">My Board</span>
+                            {group.student ? (
+                              <div className="relative group/img cursor-zoom-in" onClick={() => setZoomedImage(group.student?.content_url || null)}>
+                                <img src={group.student.content_url} className="w-full h-auto rounded-lg shadow-sm border border-white/5" alt="Student board" />
+                                <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors rounded-lg flex items-center justify-center opacity-0 group-hover/img:opacity-100">
+                                  <Maximize2 className="h-5 w-5 text-white" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex-1 min-h-[200px] rounded-lg bg-white/5 border border-dashed border-white/10 flex items-center justify-center text-gray-500 text-[11px] text-center p-4">
+                                학생 판서 자료가 <br /> 등록되지 않았습니다
+                              </div>
+                            )}
                           </div>
-                          {group.student ? (
-                            <img src={group.student.content_url} className="w-full h-auto rounded-lg shadow-sm" alt="My board" />
-                          ) : (
-                            <div className="flex-1 min-h-[120px] rounded-lg bg-white/5 border border-dashed border-white/10 flex items-center justify-center text-gray-500 text-xs">
-                              나의 판서 없음
+                        )}
+
+                        {/* Teacher Board - Now on the RIGHT */}
+                        {(viewContext === 'teacher' || viewContext === 'compare') && (
+                          <div className="flex flex-col bg-[#1e1e24] p-2 sm:p-3 rounded-xl border border-white/5 shadow-inner">
+                            <div className="flex items-center gap-2 mb-3 w-fit px-3 py-1 bg-amber-500/10 rounded-full border border-amber-500/20">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.8)]" />
+                              <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">선생님 판서</span>
                             </div>
-                          )}
-                        </div>
+                            {group.teacher ? (
+                              <div className="relative group/img cursor-zoom-in" onClick={() => setZoomedImage(group.teacher?.content_url || null)}>
+                                <img src={group.teacher.content_url} className="w-full h-auto rounded-lg shadow-sm border border-white/5" alt="Teacher board" />
+                                <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors rounded-lg flex items-center justify-center opacity-0 group-hover/img:opacity-100">
+                                  <Maximize2 className="h-5 w-5 text-white" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex-1 min-h-[200px] rounded-lg bg-white/5 border border-dashed border-white/10 flex items-center justify-center text-gray-500 text-[11px] text-center p-4">
+                                선생님 판서 자료가 <br /> 등록되지 않았습니다
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </motion.div>
                 ))
               ) : (
                 currentImages.map((image: any, index: number) => (
-                  <div id={`page-${index}`} key={image.id}>
+                  <div id={`page-${index}`} key={image.id} className="group relative cursor-zoom-in" onClick={() => setZoomedImage(image.content_url)}>
                     <VisibleImage src={image.content_url} index={index} />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors rounded-xl flex items-center justify-center">
+                      <div className="bg-black/60 backdrop-blur-md p-3 rounded-full opacity-0 group-hover:opacity-100 transition-all scale-90 group-hover:scale-100">
+                        <Maximize2 className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
                   </div>
                 ))
               )}
@@ -529,31 +701,65 @@ export default function ViewerPage() {
                   onChangeState={() => { }}
                 >
                   {isSplitView ? (
-                    imageGroups.map((group, index) => (
-                      <div key={index} className="page">
-                        <div className="relative w-full h-full bg-white flex flex-col p-3 rounded-lg shadow-lg">
-                          <div className="grid grid-rows-2 h-full gap-2">
-                            <div className="relative bg-white rounded-xl overflow-hidden border-2 border-blue-100">
-                              <div className="absolute top-0 right-0 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-3 py-1 text-[10px] z-10 font-bold rounded-bl-lg">Teacher</div>
-                              {group.teacher ? (
-                                <img src={group.teacher.content_url} className="w-full h-full object-contain" alt="Teacher" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">선생님 판서 없음</div>
-                              )}
-                            </div>
-                            <div className="relative bg-white rounded-xl overflow-hidden border-2 border-emerald-100">
-                              <div className="absolute top-0 right-0 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white px-3 py-1 text-[10px] z-10 font-bold rounded-bl-lg">My Work</div>
-                              {group.student ? (
-                                <img src={group.student.content_url} className="w-full h-full object-contain" alt="My work" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">나의 판서 없음</div>
-                              )}
+                    (() => {
+                      const pages = [];
+                      // 0. Cover Page (Alone on Right)
+                      pages.push(
+                        <div key="cover" className="page">
+                          <div className="w-full h-full bg-slate-50 flex items-center justify-center p-8">
+                            <div className="text-center">
+                              <BookOpen className="h-16 w-16 text-primary/20 mx-auto mb-4" />
+                              <h2 className="text-xl font-bold text-slate-400">학습 결과 비교</h2>
+                              <p className="text-sm text-slate-300">학생과 선생님의 판서를 <br />넘겨보며 비교해 보세요</p>
                             </div>
                           </div>
-                          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground font-medium">Page {index + 1}</div>
                         </div>
-                      </div>
-                    ))
+                      );
+                      // 1. Placeholder to make next page LEFT (Page 1)
+                      // Actually, if Page 0 is Cover (Right), then Page 1 is Left, Page 2 is Right.
+                      // Wait. In react-pageflip showCover:true: 
+                      // Page 0 = Cover (Right)
+                      // Page 1 = Left, Page 2 = Right
+                      // So Group 0 (S, T) should be Page 1 and Page 2.
+
+                      imageGroups.forEach((group, index) => {
+                        // Student Board (Left)
+                        pages.push(
+                          <div key={`s-${index}`} className="page">
+                            <div className="relative w-full h-full bg-white flex flex-col p-4 shadow-inner">
+                              <div className="flex items-center gap-2 mb-3 w-fit px-3 py-1 bg-blue-500/10 rounded-full border border-blue-500/20">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">학생 판서</span>
+                              </div>
+                              {group.student ? (
+                                <img src={group.student.content_url} className="flex-1 w-full h-full object-contain" alt="Student" />
+                              ) : (
+                                <div className="flex-1 w-full h-full flex items-center justify-center bg-slate-50 text-slate-300 text-xs text-center border-2 border-dashed border-slate-100 rounded-xl">학생 판서 없음</div>
+                              )}
+                              <div className="mt-4 text-[10px] text-slate-300 font-mono text-center">PAGE {index + 1} - Student</div>
+                            </div>
+                          </div>
+                        );
+                        // Teacher Board (Right)
+                        pages.push(
+                          <div key={`t-${index}`} className="page">
+                            <div className="relative w-full h-full bg-white flex flex-col p-4 shadow-inner">
+                              <div className="flex items-center gap-2 mb-3 w-fit px-3 py-1 bg-amber-500/10 rounded-full border border-amber-500/20">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">선생님 판서</span>
+                              </div>
+                              {group.teacher ? (
+                                <img src={group.teacher.content_url} className="flex-1 w-full h-full object-contain" alt="Teacher" />
+                              ) : (
+                                <div className="flex-1 w-full h-full flex items-center justify-center bg-slate-50 text-slate-300 text-xs text-center border-2 border-dashed border-slate-100 rounded-xl">선생님 판서 없음</div>
+                              )}
+                              <div className="mt-4 text-[10px] text-slate-300 font-mono text-center">PAGE {index + 1} - Teacher</div>
+                            </div>
+                          </div>
+                        );
+                      });
+                      return pages;
+                    })()
                   ) : (
                     currentImages.map((image: any, index: number) => (
                       <div key={image.id} className="page">
@@ -588,60 +794,162 @@ export default function ViewerPage() {
         )}
       </main>
 
-      {/* 풋터 - 모바일 최적화 */}
+      {/* 풋터 - 모바일 최적화 (페이지 번호만 표시) */}
       <footer className="relative bg-[#18181b]/80 backdrop-blur-xl px-4 py-3 border-t border-white/10 z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.1)]">
-        <div className="px-1 sm:px-2 pt-1 pb-safe max-w-7xl mx-auto">
-          {/* 페이지 정보 + 모바일 플립 버튼 */}
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-bold text-gray-200 font-mono">
-              {currentPage + 1} <span className="text-gray-500 font-normal tracking-wider">/ {currentImages.length}</span>
-            </span>
+        <div className="px-1 sm:px-2 pt-1 pb-safe max-w-7xl mx-auto flex items-center justify-between">
+          <span className="text-sm font-bold text-gray-200 font-mono">
+            {currentPage + 1} <span className="text-gray-500 font-normal tracking-wider">/ {currentImages.length}</span>
+          </span>
 
-            {isMobile && viewMode === 'flip' && (
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={prevPage} disabled={currentPage === 0} className="h-8 px-3 bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white">
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={nextPage} disabled={currentPage >= currentImages.length - 1} className="h-8 px-3 bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white">
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-
-            <div className="hidden sm:flex items-center gap-2 text-xs text-gray-400">
-              <Grid3X3 className="h-3 w-3" />
-              {viewMode === 'flip' ? '화살표 키로 이동' : '스크롤하여 보기'}
-            </div>
-          </div>
-
-          {/* 썸네일 바 - 모바일에서도 잘 보이게 */}
-          <div className="flex items-center space-x-3 overflow-x-auto pb-2 scrollbar-hide -mx-2 px-2">
-            {currentImages.map((item: any, index: number) => (
-              <button
-                key={isSplitView ? index : item.id}
-                onClick={() => goToPage(index)}
-                className={`group relative flex-shrink-0 transition-all duration-300 rounded-lg overflow-hidden ${currentPage === index
-                  ? 'ring-2 ring-primary ring-offset-2 ring-offset-[#18181b] scale-[1.05] shadow-[0_0_15px_rgba(139,92,246,0.3)]'
-                  : 'opacity-50 hover:opacity-100'
-                  }`}
-              >
-                <img
-                  src={isSplitView ? (item.student?.content_url || item.teacher?.content_url) : item.content_url}
-                  alt={`Page ${index + 1}`}
-                  className="w-14 h-20 sm:w-16 sm:h-24 object-cover border border-white/10"
-                />
-                <div className={`absolute bottom-0 inset-x-0 h-1/2 bg-gradient-to-t from-black/80 to-transparent transition-opacity ${currentPage === index ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
-                <div className={`absolute bottom-1 w-full text-center text-[10px] sm:text-xs font-medium text-white transition-opacity ${currentPage === index ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                  {index + 1}
-                </div>
-                {isSplitView && item.teacher && item.student && (
-                  <div className="absolute top-1 right-1 bg-amber-500 w-2 h-2 rounded-full ring-2 ring-[#18181b] shadow-sm animate-pulse" />
-                )}
-              </button>
-            ))}
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const prev = Math.max(0, currentPage - 1);
+                goToPage(prev);
+                setCurrentPage(prev);
+              }}
+              disabled={currentPage === 0}
+              className="h-8 px-3 bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const next = Math.min(currentImages.length - 1, currentPage + 1);
+                goToPage(next);
+                setCurrentPage(next);
+              }}
+              disabled={currentPage >= currentImages.length - 1}
+              className="h-8 px-3 bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </footer>
+
+      {/* Floating Video Player */}
+      <AnimatePresence>
+        {activeVideo && (
+          <motion.div
+            drag
+            dragMomentum={false}
+            onDragStart={() => setIsVideoDragging(true)}
+            onDragEnd={() => setIsVideoDragging(false)}
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            style={{ touchAction: "none", width: videoWidth }}
+            className="group fixed bottom-24 right-4 sm:right-10 z-[100] bg-gray-900 rounded-xl shadow-2xl border border-white/10 overflow-hidden flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-3 py-2 bg-[#18181b]/95 backdrop-blur-md border-b border-white/10 cursor-move">
+              <span className="text-[10px] font-bold text-gray-200 flex items-center gap-2 uppercase tracking-wider">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                수업 영상
+              </span>
+              <button
+                onPointerDownCapture={(e) => e.stopPropagation()}
+                onClick={() => setActiveVideo(null)}
+                className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {/* Body */}
+            <div
+              className="relative pt-[56.25%] w-full bg-black group"
+              onPointerDownCapture={(e) => e.stopPropagation()}
+            >
+              {(() => {
+                const isYouTube = activeVideo.includes('youtube.com') || activeVideo.includes('youtu.be');
+                let embedUrl = activeVideo;
+                if (isYouTube) {
+                  const videoId = activeVideo.includes('v=')
+                    ? activeVideo.split('v=')[1].split('&')[0]
+                    : activeVideo.split('/').pop()?.split('?')[0];
+                  // rel=0, modestbranding=1, iv_load_policy=3, disablekb=1 to minimize distractions
+                  embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&showinfo=0`;
+                }
+
+                return isYouTube ? (
+                  <div className="absolute inset-0 overflow-hidden">
+                    <iframe
+                      src={embedUrl}
+                      className="absolute top-0 left-0 w-full h-full outline-none border-0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                    {/* Click Shields to prevent YouTube link escape */}
+                    {/* Top overlay: blocks title and share button */}
+                    <div
+                      className="absolute top-0 left-0 w-full h-[60px] z-10"
+                      onPointerDownCapture={(e) => e.stopPropagation()}
+                    />
+                    {/* Bottom right overlay: blocks YouTube logo/link */}
+                    <div
+                      className="absolute bottom-10 right-0 w-[120px] h-[60px] z-10"
+                      onPointerDownCapture={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                ) : (
+                  <video
+                    src={activeVideo}
+                    controls
+                    controlsList="nodownload"
+                    onContextMenu={(e) => e.preventDefault()}
+                    className="absolute top-0 left-0 w-full h-full outline-none"
+                    autoPlay
+                  />
+                );
+              })()}
+              {/* Overlay to prevent iframe from swallowing pointer events during drag or resize */}
+              {isVideoDragging && <div className="absolute inset-0 z-10" />}
+            </div>
+
+            {/* Resize Handle (Bottom-Right) */}
+            <div
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const target = e.currentTarget;
+                target.setPointerCapture(e.pointerId);
+
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startWidth = videoWidth;
+                const aspectRatio = 9 / 16;
+                const diagonalSq = 1 + aspectRatio * aspectRatio;
+
+                const onPointerMove = (moveEvent: PointerEvent) => {
+                  const deltaX = moveEvent.clientX - startX;
+                  const deltaY = moveEvent.clientY - startY;
+                  const projection = (deltaX * 1 + deltaY * aspectRatio) / diagonalSq;
+                  const newWidth = Math.max(250, Math.min(window.innerWidth * 0.9, startWidth + projection));
+                  setVideoWidth(newWidth);
+                };
+
+                const onPointerUp = (upEvent: PointerEvent) => {
+                  target.releasePointerCapture(upEvent.pointerId);
+                  window.removeEventListener('pointermove', onPointerMove);
+                  window.removeEventListener('pointerup', onPointerUp);
+                };
+
+                window.addEventListener('pointermove', onPointerMove);
+                window.addEventListener('pointerup', onPointerUp);
+              }}
+              className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize z-50 flex items-center justify-center group/resize"
+            >
+              <div className="w-1.5 h-1.5 bg-white/20 rounded-full group-hover/resize:bg-primary transition-colors" />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <style jsx global>{`
         .flip-book {

@@ -1,14 +1,14 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase/client'
+import { useState, useEffect, useMemo, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { supabase, getCurrentProfile } from '@/lib/supabase/client'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Calendar } from '@/components/ui/calendar'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Calendar as CalendarIcon, BookOpen, Video, Search, ChevronDown, ChevronUp, Loader2, Clock, FileImage, Play, FolderOpen, X } from 'lucide-react'
+import { Calendar as CalendarIcon, BookOpen, Video, Search, ChevronDown, ChevronUp, Loader2, Clock, FileImage, Play, FolderOpen, X, FileText } from 'lucide-react'
 import { getStudentClasses } from '@/app/actions/class'
 import { cn, formatDate } from '@/lib/utils'
 import Image from 'next/image'
@@ -18,18 +18,37 @@ interface StudentClass {
   title: string
   class_date: string
   material_count?: number
+  video_count?: number
   thumbnail_url?: string
-  materials?: { type: string }[]
+  materials?: { type: string, content_url?: string, title?: string }[]
 }
 
 export default function StudentDashboard() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary" />
+      </div>
+    }>
+      <StudentDashboardContent />
+    </Suspense>
+  )
+}
+
+function StudentDashboardContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const studentIdParam = searchParams.get('studentId')
+
+  const [isAdminView, setIsAdminView] = useState(false)
   const [classes, setClasses] = useState<StudentClass[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc')
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
   const [showCalendar, setShowCalendar] = useState(false)
+  const [navigatingId, setNavigatingId] = useState<string | null>(null)
+  const [activeVideo, setActiveVideo] = useState<string | null>(null)
 
   useEffect(() => {
     loadClasses()
@@ -39,20 +58,31 @@ export default function StudentDashboard() {
     setLoading(true)
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      if (session) {
-        const result = await getStudentClasses(session.user.id)
+
+      let targetStudentId = session?.user?.id
+
+      if (studentIdParam) {
+        const profile = await getCurrentProfile()
+        if (profile && ['admin', 'manager', 'super_manager', 'teacher'].includes(profile.role)) {
+          targetStudentId = studentIdParam
+          setIsAdminView(true)
+        }
+      }
+
+      if (targetStudentId) {
+        const result = await getStudentClasses(targetStudentId)
         if (result.classes) {
           setClasses(result.classes)
         }
       } else {
-        // If session is not found, try one more time after a short delay
-        // to handle potential race conditions during navigation
-        await new Promise(resolve => setTimeout(resolve, 500))
-        const { data: { session: retrySession } } = await supabase.auth.getSession()
-        if (retrySession) {
-          const result = await getStudentClasses(retrySession.user.id)
-          if (result.classes) {
-            setClasses(result.classes)
+        // Fallback for cases where session might take a moment to initialize
+        // But only if we're not explicitly trying to view a student as admin
+        if (!studentIdParam) {
+          await new Promise(resolve => setTimeout(resolve, 800))
+          const { data: { session: retrySession } } = await supabase.auth.getSession()
+          if (retrySession?.user?.id) {
+            const result = await getStudentClasses(retrySession.user.id)
+            if (result.classes) setClasses(result.classes)
           }
         }
       }
@@ -136,13 +166,13 @@ export default function StudentDashboard() {
         <div className="relative z-10">
           <div className="flex items-center gap-2 mb-2">
             <span className="h-2 w-2 rounded-full bg-primary shadow-sm animate-pulse" />
-            <p className="text-[10px] font-bold text-primary uppercase tracking-[0.2em]">Learning Portal</p>
+            <p className="text-[10px] font-bold text-primary uppercase tracking-[0.2em]">{isAdminView ? 'Admin View' : 'Learning Portal'}</p>
           </div>
           <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
-            나의 학습 라이브러리
+            {isAdminView ? '학생 대시보드 미리보기' : '나의 학습 라이브러리'}
           </h1>
           <p className="text-sm text-muted-foreground">
-            지금까지 {classes.length}개의 수업에서 {stats.totalMaterials}개의 자료가 등록되어 있어요
+            {isAdminView ? '해당 학생의 화면 구조를 보고 있습니다.' : `지금까지 ${stats.totalClasses}개의 수업에서 ${stats.totalMaterials}개의 학습 자료(영상/문서)가 등록되어 있어요`}
           </p>
         </div>
       </motion.div>
@@ -311,9 +341,20 @@ export default function StudentDashboard() {
                     whileHover={{ y: -4 }}
                   >
                     <Card
-                      className="border overflow-hidden cursor-pointer group hover:shadow-lg transition-all"
-                      onClick={() => router.push(`/student/viewer/${cls.id}`)}
+                      className={cn(
+                        "border overflow-hidden cursor-pointer group hover:shadow-lg transition-all relative",
+                        navigatingId === cls.id && "ring-2 ring-primary opacity-80"
+                      )}
+                      onClick={() => {
+                        setNavigatingId(cls.id);
+                        router.push(`/student/viewer/${cls.id}`);
+                      }}
                     >
+                      {navigatingId === cls.id && (
+                        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/40 backdrop-blur-[1px]">
+                          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        </div>
+                      )}
                       {/* Thumbnail */}
                       <div className="aspect-video relative bg-gradient-to-br from-primary/5 to-violet-50 overflow-hidden">
                         {cls.thumbnail_url ? (
@@ -321,7 +362,8 @@ export default function StudentDashboard() {
                             src={cls.thumbnail_url}
                             alt={cls.title}
                             fill
-                            className="object-cover group-hover:scale-105 transition-transform duration-500"
+                            priority={idx < 6}
+                            className="object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
                           />
                         ) : (
                           <div className="absolute inset-0 flex items-center justify-center">
@@ -332,6 +374,13 @@ export default function StudentDashboard() {
                         <div className="absolute top-2 left-2 px-2 py-1 rounded-md bg-white/90 backdrop-blur-sm text-xs font-medium text-foreground shadow-sm">
                           {formatDate(cls.class_date)}
                         </div>
+                        {/* Video Indicator Badge */}
+                        {cls.video_count && cls.video_count > 0 ? (
+                          <div className="absolute top-2 right-2 px-2 py-1 rounded-md bg-rose-500/90 backdrop-blur-sm text-[10px] font-bold text-white shadow-sm flex items-center gap-1 animate-in fade-in zoom-in duration-300">
+                            <Video className="h-3 w-3" />
+                            <span>{cls.video_count} REC</span>
+                          </div>
+                        ) : null}
                         {/* Play Overlay */}
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
                           <div className="h-12 w-12 rounded-full bg-white/90 backdrop-blur-sm shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 transition-all">
@@ -345,16 +394,34 @@ export default function StudentDashboard() {
                         <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2 mb-2">
                           {cls.title}
                         </h3>
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
                           <span className="flex items-center gap-1">
-                            <FileImage className="h-3 w-3" />
-                            {cls.material_count || 0}개 자료
+                            <FileText className="h-3 w-3" />
+                            {cls.material_count || 0}개 학습자료
                           </span>
                           <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
                             {formatDate(cls.class_date)}
                           </span>
                         </div>
+                        {/* 영상 바로보기 버튼 */}
+                        {cls.materials?.some(m => m.type === 'video_link') && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full h-8 text-xs bg-red-50 hover:bg-red-100 text-red-600 border-red-200 hover:border-red-300 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const video = cls.materials?.find(m => m.type === 'video_link')
+                              if (video?.content_url) {
+                                setActiveVideo(video.content_url)
+                              }
+                            }}
+                          >
+                            <Play className="h-3.5 w-3.5 mr-1.5 fill-current" />
+                            수업 영상 보기
+                          </Button>
+                        )}
                       </CardContent>
                     </Card>
                   </motion.div>
@@ -446,18 +513,19 @@ export default function StudentDashboard() {
                             <div className="flex items-center gap-3">
                               <div className={cn("p-2.5 rounded-xl shrink-0 transition-colors",
                                 m.type === 'video_link' ? 'bg-rose-50 text-rose-600 group-hover:bg-rose-100' :
-                                  m.type?.includes('teacher') ? 'bg-blue-50 text-blue-600 group-hover:bg-blue-100' :
+                                  (m.type === 'blackboard_image' || m.type === 'teacher_blackboard_image') ? 'bg-amber-50 text-amber-600 group-hover:bg-amber-100' :
                                     'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100'
                               )}>
                                 {m.type === 'video_link' ? <Video className="h-4 w-4" /> :
-                                  m.type?.includes('teacher') ? <BookOpen className="h-4 w-4" /> : <FileImage className="h-4 w-4" />}
+                                  (m.type === 'blackboard_image' || m.type === 'teacher_blackboard_image') ? <FileImage className="h-4 w-4" /> :
+                                    <FileText className="h-4 w-4" />}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <h4 className="text-sm font-bold text-slate-800 truncate mb-0.5">
-                                  {m.title || (m.type === 'video_link' ? 'Video Record' : 'Lecture Note')}
+                                  {m.title || (m.type === 'video_link' ? '수업 영상' : m.type.includes('blackboard') ? '수업 판서' : '학습 자료')}
                                 </h4>
                                 <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">
-                                  {m.type === 'video_link' ? 'Video' : 'Document'}
+                                  {m.type === 'video_link' ? 'Video' : m.type.includes('blackboard') ? 'Blackboard' : 'Material'}
                                 </p>
                               </div>
                               <Button
@@ -486,6 +554,60 @@ export default function StudentDashboard() {
           </Card>
         </motion.div>
       </div>
+
+      {/* 플로팅 비디오 플레이어 */}
+      <AnimatePresence>
+        {activeVideo && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed bottom-4 right-4 z-[100] w-[min(90vw,420px)] bg-gray-900 rounded-xl shadow-2xl border border-gray-700 overflow-hidden"
+          >
+            <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700">
+              <span className="text-xs font-semibold text-gray-200 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                수업 영상
+              </span>
+              <button
+                onClick={() => setActiveVideo(null)}
+                className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="relative pt-[56.25%] w-full bg-black">
+              {(() => {
+                const isYouTube = activeVideo.includes('youtube.com') || activeVideo.includes('youtu.be')
+                let embedUrl = activeVideo
+                if (isYouTube) {
+                  const videoId = activeVideo.includes('v=')
+                    ? activeVideo.split('v=')[1].split('&')[0]
+                    : activeVideo.split('/').pop()?.split('?')[0]
+                  embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0`
+                }
+                return isYouTube ? (
+                  <iframe
+                    src={embedUrl}
+                    className="absolute inset-0 w-full h-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <video
+                    src={activeVideo}
+                    controls
+                    controlsList="nodownload"
+                    onContextMenu={(e) => e.preventDefault()}
+                    className="absolute inset-0 w-full h-full"
+                    autoPlay
+                  />
+                )
+              })()}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

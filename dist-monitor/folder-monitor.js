@@ -169,7 +169,7 @@ async function processVideo(filePath, rootDir, fileName) {
 
         const { data: classes } = await supabase
             .from('classes')
-            .select('id, title, student:profiles(full_name)')
+            .select('id, title, student:profiles!classes_student_id_fkey(full_name)')
             .eq('class_date', classDate)
             .in('title', parts); // Check if title is IN [M1, MyClass, SubType...]
 
@@ -258,7 +258,7 @@ async function processTeacherImage(filePath, rootDir, fileName) {
         // 2. Find ALL classes for this Group/Date
         const { data: classes } = await supabase
             .from('classes')
-            .select('id, title, student:profiles(full_name)')
+            .select('id, title, student:profiles!classes_student_id_fkey(full_name)')
             .eq('class_date', classDate)
             .in('title', parts);
 
@@ -646,51 +646,60 @@ async function main() {
     console.log("   ClassIn Archive - Persistent Folder Monitor");
     console.log("==================================================");
 
-    let watchDir = "";
+    let watchDirs = [];
 
     // Load config if exists
     if (fs.existsSync(CONFIG_FILE)) {
         try {
             const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-            if (config.watchDir && fs.existsSync(config.watchDir)) {
-                watchDir = config.watchDir;
-                console.log(`Loaded config for folder: ${watchDir}`);
+            if (config.watchDirs && Array.isArray(config.watchDirs)) {
+                // Handle new format: array of objects { center, path }
+                watchDirs = config.watchDirs.map(d => {
+                    if (typeof d === 'string') return { center: 'Default', path: d };
+                    return d;
+                }).filter(d => d.path && fs.existsSync(d.path));
+            } else if (config.watchDir && fs.existsSync(config.watchDir)) { // Legacy fallback
+                watchDirs = [{ center: 'Default', path: config.watchDir }];
             }
         } catch (e) {
-            console.error("Config file corrupted, resetting...");
+            console.error("Config file corrupted or not found.");
         }
     }
 
-    if (!watchDir) {
-        watchDir = await askQuestion("Enter the full path of the folder to watch: ");
-        watchDir = watchDir.trim().replace(/^["']|["']$/g, '');
+    if (watchDirs.length === 0) {
+        console.log("No valid watch directories configured.");
+        const watchDir = await askQuestion("Enter the full path of the folder to watch initially: ");
+        const sanitizedDir = watchDir.trim().replace(/^["']|["']$/g, '');
 
-        if (!fs.existsSync(watchDir)) {
+        if (!fs.existsSync(sanitizedDir)) {
             console.error("Error: Folder does not exist!");
             await new Promise(r => setTimeout(r, 3000));
             process.exit(1);
         }
 
+        watchDirs = [{ center: 'Default', path: sanitizedDir }];
         // Save config
-        fs.writeFileSync(CONFIG_FILE, JSON.stringify({ watchDir }, null, 2));
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify({ watchDirs }, null, 2));
     }
 
     console.log("\nPerforming Initial Scan (Checking for new files)...");
 
     try {
-        const allFiles = getAllFiles(watchDir);
-        console.log(`Found ${allFiles.length} files. Checking against server...`);
+        for (const dirInfo of watchDirs) {
+            console.log(`\n--- Scanning [${dirInfo.center || 'Unassigned'}] ${dirInfo.path} ---`);
+            const allFiles = getAllFiles(dirInfo.path);
+            console.log(`Found ${allFiles.length} files. Checking against server...`);
 
-        for (const file of allFiles) {
-            await processFile(file, watchDir);
+            for (const file of allFiles) {
+                await processFile(file, dirInfo.path);
+            }
         }
     } catch (e) {
         console.error("Scan failed:", e);
     }
 
     console.log("\nInitial Scan Complete. Starting Real-time Monitor...");
-    console.log(`Monitoring: ${watchDir}`);
-    console.log("(Minimize this window to keep running in background)");
+    console.log("(Minimize this window to keep running in background)\n");
 
     // Real-time Watcher
     let isProcessing = false;
@@ -702,32 +711,37 @@ async function main() {
         isProcessing = true;
 
         while (fileQueue.length > 0) {
-            const filePath = fileQueue.shift();
+            const item = fileQueue.shift();
             // Wait 1 sec to ensure file write is complete (very common issue with huge images)
             await new Promise(r => setTimeout(r, 1000));
 
-            if (fs.existsSync(filePath)) {
-                await processFile(filePath, watchDir);
+            if (fs.existsSync(item.filePath)) {
+                await processFile(item.filePath, item.rootDir);
             }
         }
         isProcessing = false;
     }, 2000);
 
-    fs.watch(watchDir, { recursive: true }, (eventType, filename) => {
-        if (filename && eventType === 'rename') {
-            const fullPath = path.join(watchDir, filename);
-            if (fs.existsSync(fullPath)) {
-                try {
-                    const stats = fs.statSync(fullPath);
-                    if (stats.isFile()) {
-                        if (!fileQueue.includes(fullPath)) {
-                            console.log(`[NEW FILE DETECTED] ${filename}`);
-                            fileQueue.push(fullPath);
+    watchDirs.forEach(dirInfo => {
+        const rootDir = dirInfo.path;
+        console.log(`Watching (${dirInfo.center || 'Default'}): ${rootDir}`);
+
+        fs.watch(rootDir, { recursive: true }, (eventType, filename) => {
+            if (filename && eventType === 'rename') {
+                const fullPath = path.join(rootDir, filename);
+                if (fs.existsSync(fullPath)) {
+                    try {
+                        const stats = fs.statSync(fullPath);
+                        if (stats.isFile()) {
+                            if (!fileQueue.find(q => q.filePath === fullPath)) {
+                                console.log(`[NEW FILE DETECTED in ${dirInfo.center || 'Default'}] ${filename}`);
+                                fileQueue.push({ filePath: fullPath, rootDir });
+                            }
                         }
-                    }
-                } catch (e) { }
+                    } catch (e) { }
+                }
             }
-        }
+        });
     });
 }
 

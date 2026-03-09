@@ -2,6 +2,8 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
+import { requireCenterAccess } from '@/lib/supabase/server'
 
 export async function createStudent(prevState: any, formData: FormData) {
     const phoneNumber = formData.get('phoneNumber') as string
@@ -17,6 +19,11 @@ export async function createStudent(prevState: any, formData: FormData) {
     const email = `${cleanPhone}@student.local`
 
     try {
+        const cookieStore = cookies()
+        const activeCenter = cookieStore.get('active_center')?.value
+
+        const requesterProfile = await requireCenterAccess(activeCenter)
+
         // 1. Create user in Supabase Auth
         const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
             email,
@@ -32,19 +39,27 @@ export async function createStudent(prevState: any, formData: FormData) {
         if (!authData.user) throw new Error('사용자 생성 실패')
 
         // 2. Create profile in public.profiles table
-        // Note: Trigger might handle this, but explicit insert ensures role is set correctly
+        const profileData: any = {
+            id: authData.user.id,
+            email,
+            full_name: fullName,
+            role: 'student'
+        }
+
+        if (requesterProfile.role !== 'super_manager' && !(requesterProfile.role === 'admin' && requesterProfile.center === '전체')) {
+            profileData.center = requesterProfile.center
+        } else if (activeCenter && activeCenter !== '전체') {
+            profileData.center = activeCenter
+        }
+
         const { error: profileError } = await supabaseAdmin
             .from('profiles')
-            .upsert({
-                id: authData.user.id,
-                email,
-                full_name: fullName,
-                role: 'student'
-            })
+            .upsert(profileData)
 
         if (profileError) throw profileError
 
         revalidatePath('/admin/dashboard')
+        revalidatePath('/admin/students')
         return { success: true }
     } catch (error: any) {
         console.error('Create student error:', error)
@@ -55,11 +70,22 @@ export async function createStudent(prevState: any, formData: FormData) {
 
 export async function deleteStudent(studentId: string) {
     try {
+        // Security check: ensure user has access to this student's center
+        const { data: student } = await supabaseAdmin
+            .from('profiles')
+            .select('center')
+            .eq('id', studentId)
+            .single()
+
+        if (student) {
+            await requireCenterAccess(student.center)
+        }
+
         // 1. Delete authentication user
         const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(studentId)
         if (authError) throw authError
 
-        // 2. Profile will be cascade deleted or we can explicitly delete to be sure
+        // 2. Profile will be cascade deleted
         const { error: profileError } = await supabaseAdmin
             .from('profiles')
             .delete()
@@ -78,6 +104,17 @@ export async function deleteStudent(studentId: string) {
 
 export async function updateStudent(studentId: string, data: { fullName?: string; password?: string; center?: string; hall?: string }) {
     try {
+        // Security check: ensure user has access to this student's center
+        const { data: student } = await supabaseAdmin
+            .from('profiles')
+            .select('center')
+            .eq('id', studentId)
+            .single()
+
+        if (student) {
+            await requireCenterAccess(student.center)
+        }
+
         // 1. Update Auth User (Password) if provided
         if (data.password) {
             const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(studentId, {
@@ -93,6 +130,11 @@ export async function updateStudent(studentId: string, data: { fullName?: string
         if (data.hall !== undefined) updateData.hall = data.hall
 
         if (Object.keys(updateData).length > 0) {
+            // Also check access if they are moving student to a NEW center
+            if (data.center) {
+                await requireCenterAccess(data.center)
+            }
+
             const { error: profileError } = await supabaseAdmin
                 .from('profiles')
                 .update(updateData)
@@ -149,7 +191,12 @@ export async function deleteStudents(studentIds: string[]) {
 
 export async function getStudents() {
     try {
-        const { data: students, error } = await supabaseAdmin
+        const cookieStore = cookies()
+        const activeCenter = cookieStore.get('active_center')?.value
+
+        const requesterProfile = await requireCenterAccess(activeCenter)
+
+        let query = supabaseAdmin
             .from('profiles')
             .select(`
                 *,
@@ -161,7 +208,15 @@ export async function getStudents() {
                 )
             `)
             .eq('role', 'student')
-            .order('full_name') // Order by name for easier searching
+
+        // If not super_manager/전체-admin, force filter by their center
+        if (requesterProfile.role !== 'super_manager' && !(requesterProfile.role === 'admin' && requesterProfile.center === '전체')) {
+            query = query.eq('center', requesterProfile.center)
+        } else if (activeCenter && activeCenter !== '전체') {
+            query = query.eq('center', activeCenter)
+        }
+
+        const { data: students, error } = await query.order('full_name') // Order by name for easier searching
 
         if (error) throw error
         return { students: students || [] }
@@ -181,6 +236,10 @@ export async function getStudentDetails(studentId: string) {
             .single()
 
         if (profileError) throw profileError
+        if (!profile) throw new Error('학생 정보를 찾을 수 없습니다.')
+
+        // Security Check: Ensure requester has access to this student's center
+        await requireCenterAccess(profile.center)
 
         // 2. Fetch Classes with Material counts
         // we can join materials to get counts

@@ -270,7 +270,7 @@ export default function GroupDetailPage({ params }: { params: { id: string } }) 
                         <CardTitle className="text-lg">
                             수업 목록 ({sessions.length})
                         </CardTitle>
-                        <Button onClick={() => router.push(`/admin/classes/new?mode=group&groupId=${group.id}`)}>
+                        <Button onClick={() => router.push(`/admin/groups/new?mode=group&groupId=${group.id}`)}>
                             <Plus className="mr-2 h-4 w-4" />
                             새 수업 올리기
                         </Button>

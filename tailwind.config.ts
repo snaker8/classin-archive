@@ -18,8 +18,8 @@ module.exports = {
     },
     extend: {
       fontFamily: {
-        heading: ['var(--font-outfit)', 'sans-serif'],
-        sans: ['var(--font-manrope)', 'sans-serif'],
+        heading: ['var(--font-outfit)', 'Pretendard', 'sans-serif'],
+        sans: ['var(--font-manrope)', 'Pretendard', 'sans-serif'],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -55,6 +55,43 @@ module.exports = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Stitch Brand Colors - Electric Purple #4913ec
+        brand: {
+          50: '#f5f3ff',
+          100: '#ede9fe',
+          200: '#ddd6fe',
+          300: '#c4b5fd',
+          400: '#a78bfa',
+          500: '#8b5cf6',
+          600: '#7c3aed',
+          700: '#6d28d9',
+          800: '#5b21b6',
+          900: '#4c1d95',
+          950: '#2e1065',
+        },
+        // Stitch Surface Colors - Deep Navy
+        surface: {
+          DEFAULT: '#020617',
+          elevated: '#0f172a',
+          card: '#1e293b',
+          overlay: 'rgba(2, 6, 23, 0.9)',
+        },
+        // Stitch Accent
+        stitch: {
+          purple: '#4913ec',
+          violet: '#7c3aed',
+          glow: 'rgba(73, 19, 236, 0.5)',
+        },
+      },
+      boxShadow: {
+        'glow': '0 0 20px rgba(73, 19, 236, 0.3)',
+        'glow-lg': '0 0 40px rgba(73, 19, 236, 0.5)',
+        'glow-xl': '0 0 60px rgba(73, 19, 236, 0.6)',
+        'inner-glow': 'inset 0 1px 0 0 rgba(255, 255, 255, 0.05)',
+        'card-hover': '0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(73, 19, 236, 0.2)',
+      },
+      backdropBlur: {
+        xs: '2px',
       },
       borderRadius: {
         lg: "var(--radius)",

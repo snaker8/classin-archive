@@ -2,11 +2,18 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
+import { requireCenterAccess } from '@/lib/supabase/server'
 
 // --- Groups CRUD ---
 
 export async function getGroups(search: string = '') {
     try {
+        const cookieStore = cookies()
+        const activeCenter = cookieStore.get('active_center')?.value
+
+        const profile = await requireCenterAccess(activeCenter)
+
         let query = supabaseAdmin
             .from('groups')
             .select(`
@@ -18,6 +25,13 @@ export async function getGroups(search: string = '') {
 
         if (search) {
             query = query.ilike('name', `%${search}%`)
+        }
+
+        // If not super_manager/전체-admin, force filter by their center
+        if (profile.role !== 'super_manager' && !(profile.role === 'admin' && profile.center === '전체')) {
+            query = query.eq('center', profile.center)
+        } else if (activeCenter && activeCenter !== '전체') {
+            query = query.eq('center', activeCenter)
         }
 
         const { data, error } = await query
@@ -37,9 +51,23 @@ export async function getGroups(search: string = '') {
 
 export async function createGroup(name: string, description: string = '', teacherId: string | null = null) {
     try {
+        const cookieStore = cookies()
+        const activeCenter = cookieStore.get('active_center')?.value
+
+        const profile = await requireCenterAccess(activeCenter)
+
+        const insertData: any = { name, description, teacher_id: teacherId }
+
+        // Use user's center if they are restricted
+        if (profile.role !== 'super_manager' && !(profile.role === 'admin' && profile.center === '전체')) {
+            insertData.center = profile.center
+        } else if (activeCenter && activeCenter !== '전체') {
+            insertData.center = activeCenter
+        }
+
         const { data, error } = await supabaseAdmin
             .from('groups')
-            .insert({ name, description, teacher_id: teacherId })
+            .insert(insertData)
             .select()
             .single()
 
@@ -58,6 +86,17 @@ export async function createGroup(name: string, description: string = '', teache
 
 export async function updateGroup(groupId: string, name: string, description: string = '', teacherId: string | null = null) {
     try {
+        // Security check: ensure user has access to this group's center
+        const { data: group } = await supabaseAdmin
+            .from('groups')
+            .select('center')
+            .eq('id', groupId)
+            .single()
+
+        if (group) {
+            await requireCenterAccess(group.center)
+        }
+
         const { data, error } = await supabaseAdmin
             .from('groups')
             .update({ name, description, teacher_id: teacherId })
@@ -81,6 +120,17 @@ export async function updateGroup(groupId: string, name: string, description: st
 
 export async function deleteGroup(groupId: string) {
     try {
+        // Security check: ensure user has access to this group's center
+        const { data: group } = await supabaseAdmin
+            .from('groups')
+            .select('center')
+            .eq('id', groupId)
+            .single()
+
+        if (group) {
+            await requireCenterAccess(group.center)
+        }
+
         const { error } = await supabaseAdmin
             .from('groups')
             .delete()

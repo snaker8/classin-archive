@@ -130,7 +130,7 @@ A: 제한이 없습니다. 필요한 만큼 업로드하세요.
 
 ### 파일 구조
 ```
-app/admin/classes/new/page.tsx  # 업로드 페이지
+app/admin/groups/new/page.tsx  # 업로드 페이지
 components/ui/toast.tsx          # 토스트 알림
 components/ui/dialog.tsx         # 미리보기 모달
 components/ui/toaster.tsx        # 토스트 컨테이너

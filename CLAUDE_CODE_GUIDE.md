@@ -186,7 +186,7 @@ Step 4: 페이지 개발
 ### 3. 기존 코드 참조하기
 
 ```
-나: app/admin/classes/new/page.tsx를 참고해서
+나: app/admin/groups/new/page.tsx를 참고해서
     app/student/dashboard/page.tsx를 만들어줘.
     비슷한 스타일로 하되, 학생용으로 수정해줘.
 ```

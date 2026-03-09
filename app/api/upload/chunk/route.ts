@@ -1,0 +1,130 @@
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+import { requireRole } from '@/lib/supabase/server';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+
+export const maxDuration = 300;
+
+// Token verification cache to avoid hitting Supabase rate limits on chunk uploads
+const tokenCache = new Map<string, { authorized: boolean, expiry: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export async function POST(req: NextRequest) {
+    try {
+        let isAuthorized = false;
+        const authHeader = req.headers.get('Authorization') || req.cookies.get('sb-access-token')?.value;
+        const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
+
+        if (token) {
+            const now = Date.now();
+            const cached = tokenCache.get(token);
+
+            if (cached && cached.expiry > now) {
+                isAuthorized = cached.authorized;
+            } else {
+                try {
+                    // requireRole checks cookies by default, but we might be using fallback header
+                    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+                    if (user && !error) {
+                        const { data: profile } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).single();
+                        if (profile && ['admin', 'manager', 'super_manager', 'teacher'].includes(profile.role)) {
+                            isAuthorized = true;
+                        }
+                    }
+
+                    // Cache the result
+                    tokenCache.set(token, { authorized: isAuthorized, expiry: now + CACHE_TTL_MS });
+                } catch (e) {
+                    console.error('[Upload Auth] Cache miss validation failed:', e);
+                }
+            }
+        }
+
+        if (!isAuthorized) {
+            return NextResponse.json({ error: '권한이 없습니다.' }, { status: 401 });
+        }
+
+        const formData = await req.formData();
+        const chunk = formData.get('chunk') as File;
+        const chunkIndex = parseInt(formData.get('chunkIndex') as string);
+        const totalChunks = parseInt(formData.get('totalChunks') as string);
+        const filename = formData.get('filename') as string;
+        const batchId = formData.get('batchId') as string;
+        const classId = formData.get('classId') as string;
+
+        if (!chunk || isNaN(chunkIndex) || !filename || !batchId || !classId) {
+            return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+        }
+
+        const uploadDir = path.join(process.cwd(), 'manual-uploads', classId, batchId);
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+
+        const filePath = path.join(uploadDir, filename);
+        const bytes = await chunk.arrayBuffer();
+        const buffer = Buffer.from(bytes);
+
+        // Standard chunk size used by client (e.g. 5MB)
+        const chunkSize = parseInt(formData.get('chunkSize') as string) || buffer.length;
+
+        // Use synchronous file descriptor for precise offset writing
+        const fd = fs.openSync(filePath, 'a+');
+        try {
+            const position = chunkIndex * chunkSize;
+            fs.writeSync(fd, buffer, 0, buffer.length, position);
+        } finally {
+            fs.closeSync(fd);
+        }
+
+        const isComplete = chunkIndex === totalChunks - 1;
+        let finalPath = filePath;
+        let storagePath = `manual/${classId}/${batchId}/${filename}`;
+
+        if (isComplete) {
+            console.log(`[Chunk Upload] Completed: ${filename} for batch ${batchId}. Uploading to Supabase...`);
+
+            try {
+                const fileBuffer = fs.readFileSync(filePath);
+                const { error: uploadError } = await supabaseAdmin
+                    .storage
+                    .from('raw-videos')
+                    .upload(storagePath, fileBuffer, {
+                        contentType: 'video/mp4', // Default to mp4 for manual uploads
+                        upsert: true
+                    });
+
+                if (uploadError) throw uploadError;
+
+                console.log(`[Chunk Upload] Successfully uploaded to Supabase: ${storagePath}`);
+
+                // Cleanup local file after successful upload to storage
+                fs.unlinkSync(filePath);
+                // Also try to remove directory if empty
+                try {
+                    const dir = path.dirname(filePath);
+                    if (fs.readdirSync(dir).length === 0) {
+                        fs.rmdirSync(dir);
+                    }
+                } catch (e) { }
+
+                finalPath = storagePath;
+            } catch (err: any) {
+                console.error('[Chunk Upload] Supabase upload failed:', err);
+                return NextResponse.json({ error: 'Failed to upload finalized file to cloud storage: ' + err.message }, { status: 500 });
+            }
+        }
+
+        return NextResponse.json({
+            success: true,
+            isComplete,
+            path: finalPath,
+            localPath: isComplete ? finalPath : `local:${filePath}`
+        });
+
+    } catch (error: any) {
+        console.error('[Chunk Upload] Error:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}

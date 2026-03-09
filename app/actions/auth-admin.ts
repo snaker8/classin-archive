@@ -2,6 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
+import { requireRole } from '@/lib/supabase/server'
 
 // Note: Using a fresh admin client here to ensure we have the service role key available in the server action context
 // We could import from lib/supabase/admin.ts but we need to be sure about the environment variables
@@ -18,6 +19,7 @@ const supabaseAdmin = createClient(
 
 export async function updateAdminPassword(password: string) {
     try {
+        await requireRole(['admin', 'super_manager'])
         // 1. Get the current user from the request context to ensure it's an admin requesting this
         // We need a separate client for auth context verification
         // However, since we are in a server action, cookies are available. 
@@ -86,6 +88,7 @@ export async function updateAdminPassword(password: string) {
 
 export async function promoteToManager(profileId: string) {
     try {
+        await requireRole(['admin', 'super_manager'])
         if (!profileId) throw new Error('프로필 ID가 필요합니다.')
 
         const { error } = await supabaseAdmin

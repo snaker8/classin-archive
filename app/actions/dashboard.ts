@@ -2,10 +2,20 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { unstable_noStore as noStore } from 'next/cache'
+import { cookies } from 'next/headers'
+import { requireRole } from '@/lib/supabase/server'
 
-export async function getDashboardData(center?: string, hall?: string) {
+export async function getDashboardData(centerParam?: string, hallParam?: string) {
     noStore()
+
+    // Read from cookies if not explicitly provided
+    const cookieStore = cookies()
+    const center = centerParam || cookieStore.get('active_center')?.value
+    const hall = hallParam
+
     try {
+        await requireRole(['admin', 'manager', 'super_manager', 'teacher'])
+
         let studentQuery = supabaseAdmin
             .from('profiles')
             .select('*')
@@ -23,31 +33,30 @@ export async function getDashboardData(center?: string, hall?: string) {
 
         if (studentsError) throw studentsError
 
-        // 2. Fetch recent classes with student info
-        let classesQuery = supabaseAdmin
+        // 2. Fetch recent classes that have materials
+        let recentClassesQuery = supabaseAdmin
             .from('classes')
             .select(`
                 *,
-                student:profiles!classes_student_id_fkey(*)
+                student:profiles!classes_student_id_fkey!inner(*),
+                materials!inner(id)
             `)
 
         if (center && center !== '전체') {
-            classesQuery = classesQuery.filter('student.center', 'eq', center)
+            recentClassesQuery = recentClassesQuery.eq('student.center', center)
         }
         if (hall && hall !== '전체') {
-            classesQuery = classesQuery.filter('student.hall', 'eq', hall)
+            recentClassesQuery = recentClassesQuery.eq('student.hall', hall)
         }
 
-        const { data: recentClassesRaw, error: classesError } = await classesQuery
-            .order('created_at', { ascending: false })
+        const { data: recentClasses, error: classesError } = await recentClassesQuery
+            .order('class_date', { ascending: false })
             .limit(5)
 
         if (classesError) throw classesError
 
-        // Filter out null results (which happen if join doesn't match filter)
-        const recentClasses = recentClassesRaw?.filter(c => c.student) || []
-
         // 3. Fetch stats (counts)
+        // ... (studentCountQuery remains same) ...
         let studentCountQuery = supabaseAdmin
             .from('profiles')
             .select('*', { count: 'exact', head: true })
@@ -65,7 +74,7 @@ export async function getDashboardData(center?: string, hall?: string) {
         // For classes and materials
         let classCountQuery = supabaseAdmin
             .from('classes')
-            .select('id, student:profiles!classes_student_id_fkey!inner(center, hall)', { count: 'exact', head: true })
+            .select('id, materials!inner(id), student:profiles!classes_student_id_fkey!inner(center, hall)', { count: 'exact', head: true })
 
         if (center && center !== '전체') {
             classCountQuery = classCountQuery.eq('student.center', center)
@@ -76,23 +85,37 @@ export async function getDashboardData(center?: string, hall?: string) {
 
         const { count: classCount } = await classCountQuery
 
-        let materialCountQuery = supabaseAdmin
+        // Instead of exact counting which inflates by student count, we fetch content_urls
+        // to count unique distinct materials/videos distributed
+        // Count unique materials by content_url to avoid inflating by student count
+        // (e.g. a group class with 10 students sharing the same blackboard = 1, not 10)
+        const { data: allMaterialsData, error: allMaterialsError } = await supabaseAdmin
             .from('materials')
-            .select('id, class:classes!inner(student:profiles!classes_student_id_fkey!inner(center, hall))', { count: 'exact', head: true })
+            .select('content_url, type')
 
-        if (center && center !== '전체') {
-            materialCountQuery = materialCountQuery.eq('class.student.center', center)
+        if (allMaterialsError) throw allMaterialsError
+
+        const uniqueVideos = new Set<string>()
+        const uniqueBlackboards = new Set<string>()
+
+        for (const m of (allMaterialsData || [])) {
+            if (!m.content_url) continue
+            if (m.type === 'video_link') {
+                uniqueVideos.add(m.content_url)
+            } else if (m.type === 'blackboard_image' || m.type === 'teacher_blackboard_image') {
+                uniqueBlackboards.add(m.content_url)
+            }
         }
-        if (hall && hall !== '전체') {
-            materialCountQuery = materialCountQuery.eq('class.student.hall', hall)
-        }
 
-        const { count: materialCount } = await materialCountQuery
+        const videoCount = uniqueVideos.size
+        const blackboardCount = uniqueBlackboards.size
+        const materialCount = videoCount + blackboardCount
 
-        // 4. Get unique class titles for filtering
+
+        // 4. Get unique class titles for filtering (only active classes)
         const { data: allClasses } = await supabaseAdmin
             .from('classes')
-            .select('title, student_id')
+            .select('title, student_id, materials!inner(id)')
 
         const uniqueClassTitles = [...new Set((allClasses || []).map(c => c.title))].sort()
 
@@ -116,6 +139,8 @@ export async function getDashboardData(center?: string, hall?: string) {
                 totalStudents: studentCount || 0,
                 totalClasses: classCount || 0,
                 totalMaterials: materialCount || 0,
+                videoCount: videoCount || 0,
+                blackboardCount: blackboardCount || 0,
             }
         }
     } catch (error) {
