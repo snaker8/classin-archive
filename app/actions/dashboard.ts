@@ -89,9 +89,18 @@ export async function getDashboardData(centerParam?: string, hallParam?: string)
         // to count unique distinct materials/videos distributed
         // Count unique materials by content_url to avoid inflating by student count
         // (e.g. a group class with 10 students sharing the same blackboard = 1, not 10)
-        const { data: allMaterialsData, error: allMaterialsError } = await supabaseAdmin
+        let materialsQuery = supabaseAdmin
             .from('materials')
-            .select('content_url, type')
+            .select('content_url, type, class:classes!inner(student:profiles!classes_student_id_fkey!inner(center, hall))')
+
+        if (center && center !== '전체') {
+            materialsQuery = materialsQuery.eq('class.student.center', center)
+        }
+        if (hall && hall !== '전체') {
+            materialsQuery = materialsQuery.eq('class.student.hall', hall)
+        }
+
+        const { data: allMaterialsData, error: allMaterialsError } = await materialsQuery
 
         if (allMaterialsError) throw allMaterialsError
 
@@ -113,9 +122,18 @@ export async function getDashboardData(centerParam?: string, hallParam?: string)
 
 
         // 4. Get unique class titles for filtering (only active classes)
-        const { data: allClasses } = await supabaseAdmin
+        let allClassesQuery = supabaseAdmin
             .from('classes')
-            .select('title, student_id, materials!inner(id)')
+            .select('title, student_id, materials!inner(id), student:profiles!classes_student_id_fkey!inner(center, hall)')
+
+        if (center && center !== '전체') {
+            allClassesQuery = allClassesQuery.eq('student.center', center)
+        }
+        if (hall && hall !== '전체') {
+            allClassesQuery = allClassesQuery.eq('student.hall', hall)
+        }
+
+        const { data: allClasses } = await allClassesQuery
 
         const uniqueClassTitles = [...new Set((allClasses || []).map(c => c.title))].sort()
 
