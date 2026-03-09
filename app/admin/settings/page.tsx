@@ -161,8 +161,11 @@ export default function SettingsPage() {
         }
     }
 
+    const [syncResult, setSyncResult] = useState<string | null>(null)
+
     const handleSync = async () => {
         setIsSyncing(true)
+        setSyncResult(null)
         try {
             const res = await fetch('/api/admin/system/trigger-sync', {
                 method: 'POST',
@@ -171,11 +174,16 @@ export default function SettingsPage() {
             })
             const data = await res.json()
             if (data.success) {
-                toast({ title: "동기화 시작됨", description: "폴더 스캔이 백그라운드에서 시작되었습니다." })
+                const msg = data.pending
+                    ? '이미 동기화 요청이 대기 중입니다.'
+                    : '동기화 요청이 등록되었습니다. 로컬 모니터가 실행 중이면 30초 내 시작됩니다.'
+                setSyncResult(msg)
+                toast({ title: "✅ 동기화 요청 완료", description: msg })
             } else {
                 throw new Error(data.error)
             }
         } catch (err: any) {
+            setSyncResult(null)
             toast({ title: "동기화 실패", description: err.message, variant: "destructive" })
         } finally {
             setIsSyncing(false)
@@ -250,8 +258,16 @@ export default function SettingsPage() {
                     <CardContent>
                         <p className="text-xs text-muted-foreground mb-4">현재 선택된 센터({activeCenter})의 폴더를 스캔하여 새로운 자료를 동기화합니다.</p>
                         <Button size="sm" onClick={handleSync} disabled={isSyncing} className="w-full">
-                            {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : "수동 동기화 실행"}
+                            {isSyncing ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> 요청 중...</> : "수동 동기화 실행"}
                         </Button>
+                        {syncResult && (
+                            <div className="mt-3 p-2.5 bg-green-50 border border-green-200 rounded-lg">
+                                <p className="text-xs text-green-700 flex items-center gap-1.5">
+                                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                    {syncResult}
+                                </p>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
             </div>
