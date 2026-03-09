@@ -1,0 +1,9 @@
+User-agent: *
+Disallow: /admin/
+Disallow: /api/
+Disallow: /teacher/
+Disallow: /student/
+Disallow: /viewer/
+Disallow: /.next/
+Allow: /
+Allow: /login

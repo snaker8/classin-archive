@@ -105,8 +105,8 @@ if (typeof window !== 'undefined') {
   import('js-cookie').then((Cookies) => {
     supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        Cookies.default.set('sb-access-token', session.access_token, { expires: 7, path: '/' })
-        Cookies.default.set('sb-refresh-token', session.refresh_token, { expires: 7, path: '/' })
+        Cookies.default.set('sb-access-token', session.access_token, { expires: 7, path: '/', secure: true, sameSite: 'strict' })
+        Cookies.default.set('sb-refresh-token', session.refresh_token, { expires: 7, path: '/', secure: true, sameSite: 'strict' })
       } else {
         Cookies.default.remove('sb-access-token', { path: '/' })
         Cookies.default.remove('sb-refresh-token', { path: '/' })

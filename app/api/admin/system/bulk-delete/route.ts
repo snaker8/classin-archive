@@ -1,21 +1,17 @@
-import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+import { verifyApiAuth } from '@/lib/api-auth'
 
 export async function DELETE(request: Request) {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const auth = await verifyApiAuth(['super_manager'])
+    if (!auth.authorized) {
+        return NextResponse.json({ success: false, error: auth.error }, { status: 403 })
+    }
 
     try {
-        // Note: For API routes, usually we rely on middleware or service role for admin tasks.
-        // Since this is a test/cleanup tool, we'll use the service role client.
-
-        console.log('Admin triggered bulk delete via API...')
+        const { supabase } = auth
 
         // Delete materials first due to foreign key constraints
-        // Using service role to bypass RLS and delete all
-        const { error: materialError } = await supabase
+        const { error: materialError } = await supabase!
             .from('materials')
             .delete()
             .neq('id', '00000000-0000-0000-0000-000000000000')
@@ -23,7 +19,7 @@ export async function DELETE(request: Request) {
         if (materialError) throw materialError
 
         // Then delete classes
-        const { error: classError } = await supabase
+        const { error: classError } = await supabase!
             .from('classes')
             .delete()
             .neq('id', '00000000-0000-0000-0000-000000000000')

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { verifyApiAuth } from '@/lib/api-auth'
 import { createClient } from '@supabase/supabase-js'
 
 function getAdmin() {
@@ -15,6 +16,11 @@ const DEFAULT_CONFIG = {
 }
 
 export async function GET() {
+    const auth = await verifyApiAuth(['admin', 'super_manager', 'manager'])
+    if (!auth.authorized) {
+        return NextResponse.json({ error: auth.error }, { status: 403 })
+    }
+
     try {
         const supabase = getAdmin()
         const { data, error } = await supabase
@@ -45,6 +51,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+    const auth = await verifyApiAuth(['super_manager'])
+    if (!auth.authorized) {
+        return NextResponse.json({ error: auth.error }, { status: 403 })
+    }
+
     try {
         const newConfig = await request.json()
 

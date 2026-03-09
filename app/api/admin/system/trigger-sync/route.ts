@@ -1,10 +1,15 @@
-import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+import { verifyApiAuth } from '@/lib/api-auth'
+import { createClient } from '@supabase/supabase-js'
 
 export async function POST(request: Request) {
+    const auth = await verifyApiAuth(['admin', 'super_manager', 'manager'])
+    if (!auth.authorized) {
+        return NextResponse.json({ success: false, error: auth.error }, { status: 403 })
+    }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     try {
@@ -39,8 +44,6 @@ export async function POST(request: Request) {
             .single()
 
         if (error) throw error
-
-        console.log(`[SYNC REQUEST] Created request ${data.id} for center: ${targetCenter}`)
 
         return NextResponse.json({
             success: true,
