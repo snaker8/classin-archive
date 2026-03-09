@@ -65,7 +65,14 @@ export async function signIn(email: string, password: string) {
     password,
   })
   if (error) throw error
-  // ... existing signIn function ...
+
+  // 로그인 성공 시 즉시 쿠키 설정 (미들웨어 인증용)
+  if (typeof window !== 'undefined' && data.session) {
+    const Cookies = (await import('js-cookie')).default
+    Cookies.set('sb-access-token', data.session.access_token, { expires: 7, path: '/', secure: true, sameSite: 'strict' })
+    Cookies.set('sb-refresh-token', data.session.refresh_token, { expires: 7, path: '/', secure: true, sameSite: 'strict' })
+  }
+
   return data
 }
 
