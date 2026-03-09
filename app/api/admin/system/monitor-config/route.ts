@@ -1,22 +1,33 @@
 import { NextResponse } from 'next/server'
-import path from 'path'
-import fs from 'fs'
+import { createClient } from '@supabase/supabase-js'
 
-const CONFIG_FILE = path.join(process.cwd(), 'scripts', 'monitor-config.json')
+function getAdmin() {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!url || !key) throw new Error('Missing Supabase env vars')
+    return createClient(url, key)
+}
+
+const DEFAULT_CONFIG = {
+    watchDirs: [],
+    autoUploadImages: false,
+    autoUploadVideos: true
+}
 
 export async function GET() {
     try {
-        if (!fs.existsSync(CONFIG_FILE)) {
-            // Return default structure if it doesn't exist
-            return NextResponse.json({
-                watchDirs: [],
-                autoUploadImages: false,
-                autoUploadVideos: true
-            })
+        const supabase = getAdmin()
+        const { data, error } = await supabase
+            .from('system_config')
+            .select('value')
+            .eq('key', 'monitor_config')
+            .single()
+
+        if (error || !data) {
+            return NextResponse.json(DEFAULT_CONFIG)
         }
 
-        const configRaw = fs.readFileSync(CONFIG_FILE, 'utf8')
-        const config = JSON.parse(configRaw)
+        const config = data.value as any
 
         // Convert old string array to object array if necessary
         if (config.watchDirs && config.watchDirs.length > 0 && typeof config.watchDirs[0] === 'string') {
@@ -37,13 +48,21 @@ export async function POST(request: Request) {
     try {
         const newConfig = await request.json()
 
-        // Validate structure (basic validation)
+        // Validate structure
         if (!newConfig || !Array.isArray(newConfig.watchDirs)) {
             return NextResponse.json({ error: 'Invalid config format' }, { status: 400 })
         }
 
-        // Save to file
-        fs.writeFileSync(CONFIG_FILE, JSON.stringify(newConfig, null, 2))
+        const supabase = getAdmin()
+        const { error } = await supabase
+            .from('system_config')
+            .upsert({
+                key: 'monitor_config',
+                value: newConfig,
+                updated_at: new Date().toISOString()
+            })
+
+        if (error) throw error
 
         return NextResponse.json({ success: true, message: 'Configuration saved successfully' })
     } catch (error: any) {
