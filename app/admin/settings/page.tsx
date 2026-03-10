@@ -47,7 +47,7 @@ export default function SettingsPage() {
                 }
 
                 // Fetch monitor config
-                const res = await fetch('/api/admin/system/monitor-config')
+                const res = await fetch('/api/admin/system/monitor-config', { credentials: 'include' })
                 if (res.ok) {
                     const data = await res.json()
                     setMonitorConfig(data)
@@ -71,7 +71,8 @@ export default function SettingsPage() {
             const res = await fetch('/api/admin/system/monitor-config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(monitorConfig)
+                body: JSON.stringify(monitorConfig),
+                credentials: 'include'
             })
             if (!res.ok) {
                 const data = await res.json()
@@ -79,7 +80,7 @@ export default function SettingsPage() {
             }
 
             // 저장 후 다시 불러와서 확인
-            const verifyRes = await fetch('/api/admin/system/monitor-config')
+            const verifyRes = await fetch('/api/admin/system/monitor-config', { credentials: 'include' })
             if (verifyRes.ok) {
                 const savedData = await verifyRes.json()
                 setMonitorConfig(savedData)
@@ -170,7 +171,8 @@ export default function SettingsPage() {
             const res = await fetch('/api/admin/system/trigger-sync', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ center: activeCenter })
+                body: JSON.stringify({ center: activeCenter }),
+                credentials: 'include'
             })
             const data = await res.json()
             if (data.success) {
@@ -195,7 +197,7 @@ export default function SettingsPage() {
         if (!confirm('정말로 모든 학생의 자료와 수업 기록을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
         setIsDeleting(true)
         try {
-            const res = await fetch('/api/admin/system/bulk-delete', { method: 'DELETE' })
+            const res = await fetch('/api/admin/system/bulk-delete', { method: 'DELETE', credentials: 'include' })
             const data = await res.json()
             if (data.success) {
                 toast({ title: "삭제 완료", description: "모든 자료와 수업이 초기화되었습니다." })
