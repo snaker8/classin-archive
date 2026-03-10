@@ -743,25 +743,26 @@ export default function ViewerPage() {
                 const videoId = activeVideo.includes('v=')
                   ? activeVideo.split('v=')[1].split('&')[0]
                   : activeVideo.split('/').pop()?.split('?')[0];
-                embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1`;
+                embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0&iv_load_policy=3&disablekb=0&showinfo=0&fs=1&playsinline=1`;
               }
 
               return isYouTube ? (
                 <div className="absolute inset-0 overflow-hidden">
                   <iframe
                     src={embedUrl}
-                    className="absolute top-0 left-0 w-full h-full outline-none border-0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    className="absolute border-0"
+                    style={{ top: '-1px', left: '-1px', width: 'calc(100% + 2px)', height: 'calc(100% + 2px)' }}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                     allowFullScreen
                   />
                   {/* Click Shields to prevent YouTube link escape */}
                   <div
-                    className="absolute top-0 left-0 w-full h-[60px] z-10"
-                    onPointerDownCapture={(e) => e.stopPropagation()}
+                    className="absolute top-0 left-0 w-full h-[52px] z-10 cursor-default"
+                    onClick={(e) => e.preventDefault()}
                   />
                   <div
-                    className="absolute bottom-10 right-0 w-[120px] h-[60px] z-10"
-                    onPointerDownCapture={(e) => e.stopPropagation()}
+                    className="absolute bottom-8 right-0 w-[140px] h-[52px] z-10 cursor-default"
+                    onClick={(e) => e.preventDefault()}
                   />
                 </div>
               ) : (

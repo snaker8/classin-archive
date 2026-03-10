@@ -584,15 +584,21 @@ function StudentDashboardContent() {
                   const videoId = activeVideo.includes('v=')
                     ? activeVideo.split('v=')[1].split('&')[0]
                     : activeVideo.split('/').pop()?.split('?')[0]
-                  embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0`
+                  embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0&iv_load_policy=3&disablekb=0&showinfo=0&fs=1&playsinline=1`
                 }
                 return isYouTube ? (
-                  <iframe
-                    src={embedUrl}
-                    className="absolute inset-0 w-full h-full border-0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
+                  <div className="absolute inset-0 w-full h-full overflow-hidden">
+                    <iframe
+                      src={embedUrl}
+                      className="absolute border-0"
+                      style={{ top: '-1px', left: '-1px', width: 'calc(100% + 2px)', height: 'calc(100% + 2px)' }}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                      allowFullScreen
+                    />
+                    {/* YouTube 로고 클릭 차단 오버레이 */}
+                    <div className="absolute top-0 right-0 w-24 h-10 z-10" />
+                    <div className="absolute bottom-0 left-0 right-0 h-7 z-10 pointer-events-none" style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.02))' }} />
+                  </div>
                 ) : (
                   <video
                     src={activeVideo}
