@@ -239,7 +239,7 @@ export default function ViewerPage() {
   }
 
   const studentImages = materials.filter(m => m.type === 'blackboard_image' && !m.title?.startsWith('[T]'))
-  const teacherImages = materials.filter(m => m.type === 'blackboard_image' && m.title?.startsWith('[T]'))
+  const teacherImages = materials.filter(m => m.type === 'teacher_blackboard_image' || (m.type === 'blackboard_image' && m.title?.startsWith('[T]')))
   const videos = materials.filter(m => m.type === 'video_link')
 
   const [boardMode, setBoardMode] = useState<'student' | 'teacher' | 'compare'>('student')

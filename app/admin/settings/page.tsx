@@ -37,16 +37,19 @@ export default function SettingsPage() {
                 const center = Cookies.get('active_center') || '전체'
                 setActiveCenter(center)
 
-                // Fetch user role
-                const { data: { user } } = await supabase.auth.getUser()
-                if (user) {
-                    const { data: profileData } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+                // 세션을 강제 갱신하여 만료된 토큰으로 API 호출하는 문제 방지
+                const { data: { session } } = await supabase.auth.refreshSession()
+                if (session) {
+                    Cookies.set('sb-access-token', session.access_token, { expires: 7, path: '/', sameSite: 'lax' })
+                    Cookies.set('sb-refresh-token', session.refresh_token, { expires: 7, path: '/', sameSite: 'lax' })
+
+                    const { data: profileData } = await supabase.from('profiles').select('role').eq('id', session.user.id).single()
                     if (profileData) {
                         setUserRole(profileData.role)
                     }
                 }
 
-                // Fetch monitor config
+                // Fetch monitor config (cookie is now guaranteed fresh)
                 const res = await fetch('/api/admin/system/monitor-config', { credentials: 'include' })
                 if (res.ok) {
                     const data = await res.json()

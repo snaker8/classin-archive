@@ -1,3 +1,8 @@
 {
-  "watchDir": "D:\\801호 클래스인 판서자료"
+  "watchDirs": [
+    {
+      "path": "D:\\OneDrive\\동래 의대관 클래스인 강의실",
+      "center": "동래"
+    }
+  ]
 }

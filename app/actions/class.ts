@@ -112,7 +112,7 @@ async function getSignedUrlsForMaterials(materials: any[]) {
         const newMaterials = [...materials];
         data.forEach((item: any) => {
             const path = item.path;
-            if (path) {
+            if (path && item.signedUrl) {
                 const indices = materialMap[path];
                 if (indices) {
                     indices.forEach((idx: number) => {

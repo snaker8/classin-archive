@@ -68,6 +68,11 @@ function addToCache(filePath) {
     }, CACHE_DURATION);
 }
 
+// Supabase Storage 키에서 한글/특수문자를 안전한 ASCII로 변환
+function safeStorageKey(str) {
+    return str.replace(/[^a-zA-Z0-9\/_\-\.]/g, '_');
+}
+
 function isVideo(fileName) {
     return fileName.match(/\.(mp4|mov|avi|wmv|mkv|webm)$/i);
 }
@@ -76,75 +81,99 @@ function isImage(fileName) {
     return fileName.match(/\.(png|jpg|jpeg|gif|webp)$/i);
 }
 
+// 폴더 구조: [모니터폴더]/[호실]/[반코드]/[수업유형]/[미니 블랙보드YYYY-MM-DD HH-MM-SS]/[파일]
+// 예: 801/중1M12S/1-1내신특화/미니 블랙보드2026-01-21 21-56-32/3_김선린.png
+// 또는: 801/중3H2실전A/미니 블랙보드2026-01-21/3_김선린.png (수업유형 없이 바로)
 function parsePath(filePath, rootDir) {
     const relativePath = path.relative(rootDir, filePath);
     const parts = relativePath.split(path.sep);
 
     if (parts.length < 3) {
-        // console.log(`[SKIP] Path too short: ${relativePath}`);
         return {};
     }
 
-    const className = parts[0];
-    const dateFolder = parts[1];
+    const room = parts[0];           // 801, 802, etc.
+    const groupCode = parts[1];      // 중1M12S, 중3H2실전A, etc.
 
-    // Date parsing
-    const dateMatch = dateFolder.match(/(\d{4}-\d{2}-\d{2})/);
-    let classDate = dateMatch ? dateMatch[1] : null;
-
-    // Backup date parsing from all parts if folder name isn't strict date
-    if (!classDate) {
-        for (const part of parts) {
-            const match = part.match(/(\d{4})-?(\d{2})-?(\d{2})/);
-            if (match) {
-                classDate = `${match[1]}-${match[2]}-${match[3]}`;
-                break;
-            }
+    // 날짜 추출: 모든 폴더에서 YYYY-MM-DD 패턴 찾기
+    let classDate = null;
+    let dateFolderIndex = -1;
+    for (let i = 0; i < parts.length; i++) {
+        const match = parts[i].match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (match) {
+            classDate = `${match[1]}-${match[2]}-${match[3]}`;
+            dateFolderIndex = i;
+            break;
         }
     }
-
     if (!classDate) {
         classDate = new Date().toISOString().split('T')[0];
     }
 
-    return { className, classDate, relativePath, dateFolder, parts };
+    // 수업유형 추출: 반코드와 날짜폴더 사이에 있는 폴더들
+    // 예: parts = [801, 중1M12S, 1-1내신특화, 미니블랙보드..., 파일]
+    //     subType = "1-1내신특화"
+    // 예: parts = [801, 중3H2실전A, 미니블랙보드..., 파일]
+    //     subType = null (반코드 바로 아래가 날짜폴더)
+    let subType = null;
+    const subTypeParts = [];
+    const endIndex = dateFolderIndex > 2 ? dateFolderIndex : parts.length - 1;
+    for (let i = 2; i < endIndex; i++) {
+        // 날짜가 포함된 폴더(미니 블랙보드...)는 건너뜀
+        if (!parts[i].match(/\d{4}-\d{2}-\d{2}/)) {
+            subTypeParts.push(parts[i]);
+        }
+    }
+    if (subTypeParts.length > 0) {
+        subType = subTypeParts[subTypeParts.length - 1]; // 가장 깊은 수업유형 폴더
+    }
+
+    return { room, groupCode, subType, classDate, relativePath, parts };
+}
+
+// 네이밍 폴더(반코드) 유효성 검사: 날짜폴더나 미니블랙보드 폴더가 아닌 실제 반코드인지 확인
+function isValidGroupCode(code) {
+    if (!code) return false;
+    // 미니 블랙보드 폴더명이면 반코드가 아님
+    if (code.match(/미니\s*블랙보드/i)) return false;
+    // 날짜 패턴만 있는 폴더면 반코드가 아님
+    if (code.match(/^\d{4}-\d{2}-\d{2}/)) return false;
+    return true;
 }
 
 // MAIN DISPATCHER
-async function processFile(filePath, rootDir) {
+async function processFile(filePath, rootDir, centerName) {
     if (processedFiles.has(filePath)) return;
 
     const fileName = path.basename(filePath);
     if (fileName.startsWith('.')) return;
 
+    // 네이밍 폴더(반코드) 안에 있는 파일만 처리
+    const { groupCode } = parsePath(filePath, rootDir);
+    if (!isValidGroupCode(groupCode)) {
+        console.log(`[SKIP] 네이밍 폴더(반코드) 없음, 업로드 건너뜀: ${fileName}`);
+        return;
+    }
+
     if (isVideo(fileName)) {
         await processVideo(filePath, rootDir, fileName);
     } else if (isImage(fileName)) {
-        await processImage(filePath, rootDir, fileName);
+        await processImage(filePath, rootDir, fileName, centerName);
     }
 }
 
 // Process Video (Shared Class Material)
 async function processVideo(filePath, rootDir, fileName) {
-    const { className, classDate, relativePath, parts } = parsePath(filePath, rootDir);
-    if (!className || !classDate) return;
+    const { room, groupCode, subType, classDate, relativePath, parts } = parsePath(filePath, rootDir);
+    if (!groupCode || !classDate) return;
 
-    console.log(`[VIDEO DETECTED] Path: ${relativePath} | Date: ${classDate}`);
+    console.log(`[VIDEO DETECTED] ${groupCode}/${subType || ''} | Date: ${classDate} | ${fileName}`);
 
     try {
-        // 1. Upload to Shared Storage (if not exists)
-        const safeFileName = `${Date.now()}_${fileName}`;
-        // Note: storagePath still uses the raw folder structure (M1/Class/...) 
-        // which is fine, as long as we LINK it to the right class.
-        // Actually, let's keep storage organization clean if possible, but raw path is safer for uniqueness.
-        // Let's stick to using 'className' (first part) for storage folder to keep it somewhat organized, 
-        // or we could use the full relative dir. Let's use parts[0] + parts[1]... actually parsePath already gives strict struct.
-        // Let's just use what we have.
-
-        const storagePath = `_shared/${className}/${classDate}/${safeFileName}`;
+        const safeFileName = `${Date.now()}_${safeStorageKey(fileName)}`;
+        const storagePath = `_shared/${safeStorageKey(groupCode)}/${classDate}/${safeFileName}`;
         const fileContent = fs.readFileSync(filePath);
 
-        // Simple ContentType detection
         let contentType = 'video/mp4';
         if (fileName.toLowerCase().endsWith('.mov')) contentType = 'video/quicktime';
         else if (fileName.toLowerCase().endsWith('.webm')) contentType = 'video/webm';
@@ -162,24 +191,28 @@ async function processVideo(filePath, rootDir, fileName) {
 
         const contentUrl = publicUrlData.publicUrl;
 
-        // 2. Find ALL classes for this Group/Date
-        // IMPROVED: Check all path parts for a matching Class Title
-        // Since we don't know the exact class name, we query classes on this date 
-        // that have a title matching ANY of our path parts.
+        // 그룹 기반으로 정확한 수업 매칭 (그룹 자동생성 안 함)
+        const matchedGroup = await findOrCreateGroup(groupCode, subType, null, false);
+        if (!matchedGroup) {
+            console.log(`   -> [SKIP] 매칭 그룹 없음. 비디오 업로드만 완료, 연결 안 함.`);
+            addToCache(filePath);
+            return;
+        }
+        const targetTitle = matchedGroup.name;
 
-        const { data: classes } = await supabase
+        let { data: classes } = await supabase
             .from('classes')
             .select('id, title, student:profiles!classes_student_id_fkey(full_name)')
             .eq('class_date', classDate)
-            .in('title', parts); // Check if title is IN [M1, MyClass, SubType...]
+            .eq('title', targetTitle);
 
         if (!classes || classes.length === 0) {
-            console.log(`   -> [WARN] No classes found for ${className} on ${classDate}. Video uploaded but not linked. (Will link when students are added)`);
+            console.log(`   -> [INFO] '${targetTitle}' 수업이 아직 없음. 비디오 업로드만 완료.`);
             addToCache(filePath);
             return;
         }
 
-        console.log(`   -> Linking video to ${classes.length} students...`);
+        console.log(`   -> Linking video to ${classes.length} students (title='${targetTitle}')...`);
 
         // 3. Link to each class
         for (const cls of classes) {
@@ -212,19 +245,16 @@ async function processVideo(filePath, rootDir, fileName) {
 // -----------------------
 
 async function processTeacherImage(filePath, rootDir, fileName) {
-    const { className, classDate, relativePath, parts } = parsePath(filePath, rootDir);
-    if (!className || !classDate) return;
+    const { room, groupCode, subType, classDate, relativePath, parts } = parsePath(filePath, rootDir);
+    if (!groupCode || !classDate) return;
 
-    // Remove number prefix for logging
     let namePart = fileName.replace(/^\d+[_ ]*/, '').replace(/\.[^/.]+$/, "").trim();
 
-    console.log(`[TEACHER IMAGE DETECTED] Name: ${namePart} | Path: ${relativePath}`);
+    console.log(`[TEACHER IMAGE DETECTED] Name: ${namePart} | ${groupCode}/${subType || ''} | ${classDate}`);
 
     try {
-        // 1. Upload to Shared Storage (if not exists)
-        const safeFileName = `${Date.now()}_${fileName}`;
-        // Verify if we should use a specific 'teachers' folder or just shared
-        const storagePath = `_shared/teachers/${className}/${classDate}/${safeFileName}`;
+        const safeFileName = `${Date.now()}_${safeStorageKey(fileName)}`;
+        const storagePath = `_shared/teachers/${safeStorageKey(groupCode)}/${classDate}/${safeFileName}`;
         const fileContent = fs.readFileSync(filePath);
 
         console.log(`   -> Uploading teacher board to shared storage...`);
@@ -240,35 +270,54 @@ async function processTeacherImage(filePath, rootDir, fileName) {
 
         const contentUrl = publicUrlData.publicUrl;
 
-        // NEW: Record in Teacher Board Master Gallery
         const teacherData = await findTeacher(namePart);
-        const { error: masterError } = await supabase
-            .from('teacher_board_master')
-            .insert({
-                content_url: contentUrl,
-                class_date: classDate,
-                teacher_id: teacherData ? teacherData.id : null,
-                filename: fileName
-            });
 
-        if (masterError && !masterError.message.includes('unique_violation')) {
-            console.warn(`   -> [WARN] Failed to record in master gallery: ${masterError.message}`);
+        // 중복 체크: 같은 filename + class_date 이미 있으면 master 삽입 스킵
+        const { count: masterDupCount } = await supabase
+            .from('teacher_board_master')
+            .select('*', { count: 'exact', head: true })
+            .eq('filename', fileName)
+            .eq('class_date', classDate);
+
+        if (masterDupCount === 0) {
+            const { error: masterError } = await supabase
+                .from('teacher_board_master')
+                .insert({
+                    content_url: contentUrl,
+                    class_date: classDate,
+                    teacher_id: teacherData ? teacherData.id : null,
+                    filename: fileName
+                });
+
+            if (masterError && !masterError.message.includes('unique_violation')) {
+                console.warn(`   -> [WARN] Failed to record in master gallery: ${masterError.message}`);
+            }
+        } else {
+            console.log(`   -> [SKIP] Master gallery duplicate: ${fileName} on ${classDate}`);
         }
 
-        // 2. Find ALL classes for this Group/Date
-        const { data: classes } = await supabase
+        // 그룹 기반으로 정확한 수업 매칭 (그룹 자동생성 안 함)
+        const matchedGroup = await findOrCreateGroup(groupCode, subType, null, false);
+        if (!matchedGroup) {
+            console.log(`   -> [SKIP] 매칭 그룹 없음. 선생님판서는 갤러리에만 보관.`);
+            addToCache(filePath);
+            return;
+        }
+        const targetTitle = matchedGroup.name;
+
+        let { data: classes } = await supabase
             .from('classes')
             .select('id, title, student:profiles!classes_student_id_fkey(full_name)')
             .eq('class_date', classDate)
-            .in('title', parts);
+            .eq('title', targetTitle);
 
         if (!classes || classes.length === 0) {
-            console.log(`   -> [INFO] No matching classes found yet. Board is safe in Gallery for manual distribution.`);
+            console.log(`   -> [INFO] '${targetTitle}' 수업이 아직 없음. 선생님판서는 갤러리에만 보관.`);
             addToCache(filePath);
             return;
         }
 
-        console.log(`   -> Linking teacher board to ${classes.length} existing classes...`);
+        console.log(`   -> Linking teacher board to ${classes.length} classes (title='${targetTitle}')...`);
 
         // 3. Link to each class
         for (const cls of classes) {
@@ -304,9 +353,9 @@ async function processTeacherImage(filePath, rootDir, fileName) {
 
 
 // Process Student Image
-async function processImage(filePath, rootDir, fileName) {
-    const { className: folderName, classDate, relativePath, dateFolder, parts } = parsePath(filePath, rootDir);
-    if (!folderName || !classDate) return;
+async function processImage(filePath, rootDir, fileName, centerName) {
+    const { room, groupCode, subType, classDate, relativePath, parts } = parsePath(filePath, rootDir);
+    if (!groupCode || !classDate) return;
 
     // Extract Name
     let namePart = fileName.replace(/^\d+[_ ]*/, '').replace(/\.[^/.]+$/, "");
@@ -318,7 +367,14 @@ async function processImage(filePath, rootDir, fileName) {
     }
 
     try {
-        // 1. Find Student
+        // 1. 선생님 이름 먼저 체크 (선생님 판서는 모든 학생에게 공유되므로 우선 확인)
+        const teacherData = await findTeacher(studentName);
+        if (teacherData) {
+            await processTeacherImage(filePath, rootDir, fileName);
+            return;
+        }
+
+        // 2. 학생 이름 체크
         const { data: profiles } = await supabase
             .from('profiles')
             .select('id, full_name')
@@ -327,68 +383,31 @@ async function processImage(filePath, rootDir, fileName) {
             .limit(1);
 
         if (!profiles || profiles.length === 0) {
-            // Check if it is a TEACHER
-            const teacherData = await findTeacher(studentName);
-            if (teacherData) {
-                await processTeacherImage(filePath, rootDir, fileName);
-                return;
-            }
-
-            console.log(`[SKIP] Student '${studentName}' not found in DB. File: ${fileName}`);
+            // 학생도 선생님도 아닌 파일 → 공통 판서 자료로 해당 반 전체 학생에게 배포
+            console.log(`[COMMON MATERIAL] '${studentName}' is not a student or teacher. Distributing to all students in group.`);
+            await processCommonImage(filePath, rootDir, fileName, groupCode, subType, classDate, centerName);
             return;
         }
         const student = profiles[0];
 
-        // 2. Determine Class Title (Group Logic)
-        // 2. Determine Class Title (Improved Logic)
-        // Goal: Use the deepest non-date folder as the Class Title (Topic).
-        // Only if THAT specific folder matches a group name, use the normalized Group Name.
-        // Do NOT let a parent folder override the specific topic folder.
-
-        let candidateTitle = folderName; // Default to root folder
-
-        // Parts includes filename at the end, so we ignore the last one.
-        // We scan from deepest folder (length-2) up to root (0).
-        for (let i = parts.length - 2; i >= 0; i--) {
-            const part = parts[i];
-            // Check if part looks like a date (YYYY-MM-DD or YYYY-MM-DD-...)
-            // Simple check: starts with 4 digits and looks date-ish
-            const isDateLike = part.match(/^\d{4}-\d{2}-\d{2}/);
-
-            if (!isDateLike) {
-                candidateTitle = part;
-                break; // Found our topic!
-            }
-        }
-
-        let targetClassTitle = candidateTitle;
+        // 2. 그룹 매칭 (없으면 자동 생성)
+        const matchedGroup = await findOrCreateGroup(groupCode, subType, centerName);
+        let targetClassTitle = matchedGroup ? matchedGroup.name : (subType ? `${groupCode} ${subType}` : groupCode);
         let assignedTeacherName = null;
 
-        // Check if our Candidate Title matches a group
-        const { data: groupMembers, error: groupError } = await supabase
-            .from('group_members')
-            .select('group:groups(name, teacher:teachers(name))')
-            .eq('student_id', student.id);
-
-        if (!groupError && groupMembers && groupMembers.length > 0) {
-            const normalize = (s) => s.replace(/\s+/g, '').toLowerCase();
-            const candidateNorm = normalize(candidateTitle);
-
-            const matchedGroup = groupMembers.find(gm => {
-                const groupNorm = normalize(gm.group.name);
-                // Exact match OR prefix match
-                return groupNorm === candidateNorm || groupNorm.startsWith(candidateNorm);
-            });
-
-            if (matchedGroup) {
-                targetClassTitle = matchedGroup.group.name;
-                if (matchedGroup.group.teacher) {
-                    assignedTeacherName = matchedGroup.group.teacher.name;
+        if (matchedGroup) {
+            // 선생님 정보 조회
+            if (matchedGroup.id) {
+                const { data: groupData } = await supabase
+                    .from('groups')
+                    .select('teacher:teachers(name)')
+                    .eq('id', matchedGroup.id)
+                    .single();
+                if (groupData && groupData.teacher) {
+                    assignedTeacherName = groupData.teacher.name;
                 }
-                console.log(`   -> [GROUP MATCH] Folder '${candidateTitle}' matched Group '${matchedGroup.group.name}'`);
-            } else {
-                console.log(`   -> [TOPIC CLASS] Using folder name: ${candidateTitle}`);
             }
+            console.log(`   -> [GROUP] ${groupCode}/${subType || ''} → '${targetClassTitle}'`);
         }
 
         // 3. Find/Create Class Session
@@ -415,7 +434,7 @@ async function processImage(filePath, rootDir, fileName) {
                 .insert({
                     student_id: student.id,
                     title: targetClassTitle,
-                    description: `Auto-uploaded from folder: ${dateFolder}`,
+                    description: `Auto-uploaded from folder: ${groupCode}/${subType || ''}`,
                     class_date: classDate,
                     created_by: adminId
                 })
@@ -436,6 +455,8 @@ async function processImage(filePath, rootDir, fileName) {
 
         if (existingCount > 0) {
             console.log(`[SKIP] Duplicate file already exists: ${fileName}`);
+            // 선생님판서가 아직 안 붙었을 수 있으므로 sibling 스캔은 실행
+            await scanForSiblingTeacherBoards(classId, path.dirname(filePath), targetClassTitle, classDate);
             addToCache(filePath);
             return;
         }
@@ -562,6 +583,189 @@ async function scanForSiblingVideos(classId, folderPath, className, classDate) {
     }
 }
 
+// 그룹 매칭 또는 자동 생성 헬퍼
+// 폴더 경로의 groupCode+subType으로 DB 그룹을 찾고, 없으면 자동 생성
+async function findOrCreateGroup(groupCode, subType, centerName, createIfMissing = true) {
+    const normalize = (s) => s.replace(/[\s\-()]/g, '').toLowerCase();
+    const groupCodeNorm = normalize(groupCode);
+    const subTypeNorm = subType ? normalize(subType) : null;
+
+    const { data: groups } = await supabase.from('groups').select('id, name, center');
+
+    if (groups) {
+        // 1순위: groupCode+subType 정확 매칭
+        const fullTarget = subTypeNorm ? groupCodeNorm + subTypeNorm : groupCodeNorm;
+        let exact = groups.filter(g => normalize(g.name) === fullTarget);
+        if (exact.length > 0) return exact[0];
+
+        // 2순위: groupCode(subType) 형식 매칭
+        if (subTypeNorm) {
+            const withParen = groupCodeNorm + subTypeNorm; // 괄호 제거된 상태로 비교
+            exact = groups.filter(g => normalize(g.name) === withParen);
+            if (exact.length > 0) return exact[0];
+        }
+
+        // 3순위: groupCode만 정확히 시작 + subType 포함
+        let candidates = groups.filter(g => normalize(g.name).startsWith(groupCodeNorm));
+        if (candidates.length > 1 && subTypeNorm) {
+            const refined = candidates.filter(g => normalize(g.name).includes(subTypeNorm));
+            if (refined.length > 0) candidates = refined;
+        }
+        // 후보가 1개만 있으면 사용, 여러개면 subType 필터링 결과 사용
+        if (candidates.length === 1) return candidates[0];
+        if (candidates.length > 1 && subTypeNorm) {
+            // subType까지 매칭된 후보만 반환
+            const refined = candidates.filter(g => normalize(g.name).includes(subTypeNorm));
+            if (refined.length > 0) return refined[0];
+        }
+        // includes 매칭 제거 - 너무 느슨해서 오매칭 원인
+        if (candidates.length > 0) {
+            console.log(`   -> [WARN] 그룹 후보 ${candidates.length}개 발견, 첫 번째 사용: '${candidates[0].name}'`);
+            return candidates[0];
+        }
+    }
+
+    // 그룹이 없으면 자동 생성 (createIfMissing=true일 때만)
+    if (!createIfMissing) {
+        console.log(`   -> [SKIP] 매칭 그룹 없음: ${groupCode}/${subType || ''}`);
+        return null;
+    }
+
+    const groupName = subType ? `${groupCode} ${subType}` : groupCode;
+    console.log(`   -> [AUTO-CREATE GROUP] '${groupName}' (센터: ${centerName || '미지정'})`);
+
+    const { data: newGroup, error } = await supabase
+        .from('groups')
+        .insert({
+            name: groupName,
+            description: `폴더 모니터에서 자동 생성`,
+            center: centerName || null
+        })
+        .select('id, name, center')
+        .single();
+
+    if (error) {
+        console.error(`   -> [ERROR] Group creation failed: ${error.message}`);
+        return null;
+    }
+
+    return newGroup;
+}
+
+// 공통 자료 처리: 학생이름이 없는 판서 → 해당 반 모든 학생에게 배포
+async function processCommonImage(filePath, rootDir, fileName, groupCode, subType, classDate, centerName) {
+    try {
+        // 1. 그룹 매칭 (없으면 자동 생성)
+        const matchedGroup = await findOrCreateGroup(groupCode, subType, centerName);
+
+        if (!matchedGroup) {
+            console.log(`   -> [SKIP] No matching group for ${groupCode}/${subType || ''}`);
+            addToCache(filePath);
+            return;
+        }
+
+        // 2. 그룹 멤버(학생) 목록 조회
+        const { data: members } = await supabase
+            .from('group_members')
+            .select('student_id, student:profiles!group_members_student_id_fkey(id, full_name)')
+            .eq('group_id', matchedGroup.id);
+
+        if (!members || members.length === 0) {
+            console.log(`   -> [SKIP] No students in group '${matchedGroup.name}'`);
+            addToCache(filePath);
+            return;
+        }
+
+        // 3. 이미지 업로드 (공유 스토리지)
+        const fileContent = fs.readFileSync(filePath);
+        const safeFileName = `${Date.now()}_${safeStorageKey(fileName)}`;
+        const storagePath = `_shared/${safeStorageKey(groupCode)}/${classDate}/${safeFileName}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('blackboard-images')
+            .upload(storagePath, fileContent, { contentType: 'image/png', upsert: false });
+
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage
+            .from('blackboard-images')
+            .getPublicUrl(storagePath);
+        const contentUrl = publicUrlData.publicUrl;
+
+        const orderMatch = fileName.match(/^(\d+)/);
+        const orderIndex = orderMatch ? parseInt(orderMatch[1]) : 0;
+
+        console.log(`   -> Distributing common material to ${members.length} students in '${matchedGroup.name}'...`);
+
+        // 4. 각 학생의 해당 날짜 수업에 연결 (없으면 생성)
+        const { data: adminUsers } = await supabase.from('profiles').select('id').eq('role', 'admin').limit(1);
+        const adminId = adminUsers && adminUsers[0] ? adminUsers[0].id : null;
+
+        for (const member of members) {
+            const studentId = member.student_id;
+            const studentName = member.student ? member.student.full_name : 'Unknown';
+
+            // 해당 학생의 해당 반/날짜 수업 찾기
+            let { data: classes } = await supabase
+                .from('classes')
+                .select('id')
+                .eq('student_id', studentId)
+                .eq('class_date', classDate)
+                .eq('title', matchedGroup.name)
+                .limit(1);
+
+            let classId;
+            if (classes && classes.length > 0) {
+                classId = classes[0].id;
+            } else {
+                // 수업 생성
+                const { data: newClass, error: createError } = await supabase
+                    .from('classes')
+                    .insert({
+                        student_id: studentId,
+                        title: matchedGroup.name,
+                        description: `Auto-created for common material`,
+                        class_date: classDate,
+                        created_by: adminId || studentId
+                    })
+                    .select()
+                    .single();
+
+                if (createError) {
+                    console.error(`      [ERROR] Failed to create class for ${studentName}: ${createError.message}`);
+                    continue;
+                }
+                classId = newClass.id;
+            }
+
+            // 중복 확인
+            const { count } = await supabase
+                .from('materials')
+                .select('*', { count: 'exact', head: true })
+                .eq('class_id', classId)
+                .eq('title', fileName);
+
+            if (count > 0) continue;
+
+            // 자료 연결
+            await supabase.from('materials').insert({
+                class_id: classId,
+                type: 'teacher_blackboard_image',
+                title: fileName,
+                content_url: contentUrl,
+                order_index: orderIndex
+            });
+            console.log(`      + ${studentName}`);
+        }
+
+        console.log(`   -> [SUCCESS] Common material distributed.`);
+        addToCache(filePath);
+
+    } catch (err) {
+        console.error(`   -> [ERROR] Common material processing failed: ${err.message}`);
+    }
+}
+
 async function findTeacher(name) {
     try {
         const { data } = await supabase
@@ -612,12 +816,20 @@ async function scanForSiblingTeacherBoards(classId, folderPath, className, class
                 if (existingMaterials && existingMaterials.length > 0) {
                     contentUrl = existingMaterials[0].content_url;
                 } else {
-                    // Trigger upload if not found
-                    console.log(`      Teacher board not on server yet. triggering upload...`);
-                    await processTeacherImage(path.join(folderPath, imgFile), folderPath, imgFile);
-                    // processTeacherImage will link to ALL classes including this one if it finds it
-                    // but due to timing, if we just created this class, processTeacherImage might find it NOW.
-                    continue;
+                    // teacher_board_master에서 URL 찾기
+                    const { data: masterBoards } = await supabase
+                        .from('teacher_board_master')
+                        .select('content_url')
+                        .eq('filename', imgFile)
+                        .eq('class_date', classDate)
+                        .limit(1);
+
+                    if (masterBoards && masterBoards.length > 0) {
+                        contentUrl = masterBoards[0].content_url;
+                    } else {
+                        console.log(`      Teacher board not on server yet. Skipping sibling link.`);
+                        continue;
+                    }
                 }
 
                 if (contentUrl) {
@@ -648,37 +860,61 @@ async function main() {
 
     let watchDirs = [];
 
-    // Load config if exists
-    if (fs.existsSync(CONFIG_FILE)) {
+    // 1순위: DB(system_config)에서 센터별 폴더 설정 읽기
+    try {
+        console.log("\nDB에서 센터별 모니터 폴더 설정을 불러오는 중...");
+        const { data, error } = await supabase
+            .from('system_config')
+            .select('value')
+            .eq('key', 'monitor_config')
+            .single();
+
+        if (!error && data && data.value && Array.isArray(data.value.watchDirs)) {
+            watchDirs = data.value.watchDirs
+                .filter(d => d.path && fs.existsSync(d.path));
+
+            if (watchDirs.length > 0) {
+                console.log(`DB에서 ${watchDirs.length}개 센터 폴더를 불러왔습니다.`);
+                // 로컬 config도 동기화
+                fs.writeFileSync(CONFIG_FILE, JSON.stringify({ watchDirs }, null, 2));
+            }
+        }
+    } catch (e) {
+        console.log("DB 설정 로드 실패, 로컬 설정을 확인합니다...");
+    }
+
+    // 2순위: 로컬 monitor-config.json 파일
+    if (watchDirs.length === 0 && fs.existsSync(CONFIG_FILE)) {
         try {
             const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
             if (config.watchDirs && Array.isArray(config.watchDirs)) {
-                // Handle new format: array of objects { center, path }
                 watchDirs = config.watchDirs.map(d => {
                     if (typeof d === 'string') return { center: 'Default', path: d };
                     return d;
                 }).filter(d => d.path && fs.existsSync(d.path));
-            } else if (config.watchDir && fs.existsSync(config.watchDir)) { // Legacy fallback
+            } else if (config.watchDir && fs.existsSync(config.watchDir)) {
                 watchDirs = [{ center: 'Default', path: config.watchDir }];
             }
         } catch (e) {
-            console.error("Config file corrupted or not found.");
+            console.error("로컬 설정 파일 오류.");
         }
     }
 
+    // 3순위: 수동 입력 (최초 설정시에만)
     if (watchDirs.length === 0) {
-        console.log("No valid watch directories configured.");
-        const watchDir = await askQuestion("Enter the full path of the folder to watch initially: ");
+        console.log("\n등록된 감시 폴더가 없습니다.");
+        console.log("웹 관리자 페이지(설정 > 센터별 모니터 폴더 관리)에서 폴더를 등록하세요.");
+        console.log("또는 아래에 직접 경로를 입력하세요.\n");
+        const watchDir = await askQuestion("감시할 폴더 경로: ");
         const sanitizedDir = watchDir.trim().replace(/^["']|["']$/g, '');
 
         if (!fs.existsSync(sanitizedDir)) {
-            console.error("Error: Folder does not exist!");
+            console.error("오류: 해당 폴더가 존재하지 않습니다!");
             await new Promise(r => setTimeout(r, 3000));
             process.exit(1);
         }
 
         watchDirs = [{ center: 'Default', path: sanitizedDir }];
-        // Save config
         fs.writeFileSync(CONFIG_FILE, JSON.stringify({ watchDirs }, null, 2));
     }
 
@@ -691,7 +927,7 @@ async function main() {
             console.log(`Found ${allFiles.length} files. Checking against server...`);
 
             for (const file of allFiles) {
-                await processFile(file, dirInfo.path);
+                await processFile(file, dirInfo.path, dirInfo.center);
             }
         }
     } catch (e) {
@@ -716,7 +952,7 @@ async function main() {
             await new Promise(r => setTimeout(r, 1000));
 
             if (fs.existsSync(item.filePath)) {
-                await processFile(item.filePath, item.rootDir);
+                await processFile(item.filePath, item.rootDir, item.centerName);
             }
         }
         isProcessing = false;
@@ -735,7 +971,7 @@ async function main() {
                         if (stats.isFile()) {
                             if (!fileQueue.find(q => q.filePath === fullPath)) {
                                 console.log(`[NEW FILE DETECTED in ${dirInfo.center || 'Default'}] ${filename}`);
-                                fileQueue.push({ filePath: fullPath, rootDir });
+                                fileQueue.push({ filePath: fullPath, rootDir, centerName: dirInfo.center });
                             }
                         }
                     } catch (e) { }
