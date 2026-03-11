@@ -80,24 +80,48 @@ export async function POST(req: NextRequest) {
 
         const isComplete = chunkIndex === totalChunks - 1;
         let finalPath = filePath;
-        let storagePath = `manual/${classId}/${batchId}/${filename}`;
+        // Sanitize filename for Supabase Storage (no Korean, spaces, brackets)
+        const safeFilename = filename
+            .replace(/[^\w.\-]/g, '_')
+            .replace(/_+/g, '_');
+        let storagePath = `manual/${classId}/${batchId}/${safeFilename}`;
 
         if (isComplete) {
-            console.log(`[Chunk Upload] Completed: ${filename} for batch ${batchId}. Uploading to Supabase...`);
+            const fileSize = fs.statSync(filePath).size;
+            const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+            console.log(`[Chunk Upload] Completed: ${filename} (${fileSizeMB}MB) for batch ${batchId}. Uploading to Supabase...`);
 
             try {
-                const fileBuffer = fs.readFileSync(filePath);
-                const { error: uploadError } = await supabaseAdmin
-                    .storage
-                    .from('raw-videos')
-                    .upload(storagePath, fileBuffer, {
-                        contentType: 'video/mp4', // Default to mp4 for manual uploads
-                        upsert: true
-                    });
+                // Use streaming fetch for large files to avoid OOM
+                const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+                const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-                if (uploadError) throw uploadError;
+                if (!supabaseUrl || !serviceKey) {
+                    throw new Error('Missing Supabase environment variables');
+                }
 
-                console.log(`[Chunk Upload] Successfully uploaded to Supabase: ${storagePath}`);
+                const fileStream = fs.createReadStream(filePath);
+                const uploadUrl = `${supabaseUrl}/storage/v1/object/raw-videos/${storagePath}`;
+
+                const response = await fetch(uploadUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${serviceKey}`,
+                        'Content-Type': 'video/mp4',
+                        'Content-Length': String(fileSize),
+                        'x-upsert': 'true',
+                    },
+                    body: fileStream as any,
+                    // @ts-ignore - duplex required for streaming body in Node 18+
+                    duplex: 'half',
+                });
+
+                if (!response.ok) {
+                    const errBody = await response.text();
+                    throw new Error(`Storage upload failed (${response.status}): ${errBody}`);
+                }
+
+                console.log(`[Chunk Upload] Successfully uploaded to Supabase: ${storagePath} (${fileSizeMB}MB)`);
 
                 // Cleanup local file after successful upload to storage
                 fs.unlinkSync(filePath);

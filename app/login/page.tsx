@@ -68,8 +68,13 @@ export default function LoginPage() {
               email = `${cleanPhone}@teacher.local`
               authResponse = await signIn(email, password)
             } catch (teacherError) {
-              // If both fail, throw the error
-              throw studentError
+              // If teacher login fails, try as parent
+              try {
+                email = `${cleanPhone}@parent.local`
+                authResponse = await signIn(email, password)
+              } catch (parentError) {
+                throw studentError
+              }
             }
           }
         }
@@ -101,6 +106,8 @@ export default function LoginPage() {
           router.push('/admin/dashboard')
         } else if (profile?.role === 'teacher') {
           router.push('/teacher/dashboard')
+        } else if (profile?.role === 'parent') {
+          router.push('/parent/dashboard')
         } else {
           router.push('/student/dashboard')
         }

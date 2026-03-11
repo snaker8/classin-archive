@@ -246,23 +246,20 @@ export async function deleteGroupSession(classIds: string[]) {
 
 export async function getGroupSessions(groupId: string) {
     try {
-        // 1. Get all student IDs in this group
+        // 1. Get member count for display
         const { data: members, error: membersError } = await supabaseAdmin
             .from('group_members')
             .select('student_id')
             .eq('group_id', groupId)
 
         if (membersError) throw membersError
-        if (!members || members.length === 0) return { sessions: [] }
+        const totalStudents = members?.length || 0
 
-        const studentIds = members.map(m => m.student_id)
-
-        // 2. Fetch ALL classes for these students
-        // We fetch minimal data to group them manually in JS
+        // 2. Fetch classes that belong to this group
         const { data: classes, error: classesError } = await supabaseAdmin
             .from('classes')
             .select('id, title, class_date, created_at, student_id')
-            .in('student_id', studentIds)
+            .eq('group_id', groupId)
             .order('class_date', { ascending: false })
 
         if (classesError) throw classesError
@@ -278,9 +275,9 @@ export async function getGroupSessions(groupId: string) {
                     class_date: cls.class_date,
                     title: cls.title,
                     student_count: 0,
-                    total_students: studentIds.length,
+                    total_students: totalStudents,
                     class_ids: [],
-                    created_at: cls.created_at, // Use first one found
+                    created_at: cls.created_at,
                 })
             }
             const session = sessionsMap.get(key)
@@ -289,15 +286,6 @@ export async function getGroupSessions(groupId: string) {
         }
 
         const sessions = Array.from(sessionsMap.values())
-
-        // 4. Fetch Thumbnail for each session (optimization: usually first class's first image)
-        // This might be expensive if many sessions. Let's do it lazy or just fetch for top 20?
-        // For now, let's just return list. The UI can fetch details on click.
-        // Actually, user wants to see at a glance. Let's fetch one material for each session to show 'has content'.
-
-        // Optimization: Get ALL material headers for these classIDs to count them?
-        // Too heavy. Let's just return the sessions and let frontend load details or keep it simple.
-        // Or better: Fetch counts for the list view?
 
         return { sessions }
     } catch (error: any) {

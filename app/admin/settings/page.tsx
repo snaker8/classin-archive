@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { updateAdminPassword } from '@/app/actions/auth-admin'
 import { useToast } from '@/components/ui/use-toast'
-import { Loader2, RefreshCcw, Trash2, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { Loader2, RefreshCcw, Trash2, AlertTriangle, CheckCircle2, Plus, FolderOpen } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import Cookies from 'js-cookie'
 
@@ -28,6 +28,8 @@ export default function SettingsPage() {
     const [configLoading, setConfigLoading] = useState(true)
     const [monitorConfig, setMonitorConfig] = useState<{ watchDirs: { center: string, path: string }[], autoUploadImages: boolean, autoUploadVideos: boolean }>({ watchDirs: [], autoUploadImages: false, autoUploadVideos: true })
     const [isSavingConfig, setIsSavingConfig] = useState(false)
+    const [configError, setConfigError] = useState<string | null>(null)
+    const [centers, setCenters] = useState<{ id: string, name: string }[]>([])
 
     // Load Monitor Config and User Role
     useEffect(() => {
@@ -49,11 +51,33 @@ export default function SettingsPage() {
                     }
                 }
 
-                // Fetch monitor config (cookie is now guaranteed fresh)
-                const res = await fetch('/api/admin/system/monitor-config', { credentials: 'include' })
-                if (res.ok) {
-                    const data = await res.json()
-                    setMonitorConfig(data)
+                // Fetch centers list
+                const { data: centersData } = await supabase
+                    .from('centers')
+                    .select('id, name')
+                    .eq('type', 'center')
+                    .order('name')
+                if (centersData) setCenters(centersData)
+
+                // Fetch monitor config
+                const token = Cookies.get('sb-access-token')
+                const authHeaders: Record<string, string> = token ? { 'Authorization': `Bearer ${token}` } : {}
+                const configRes = await fetch('/api/admin/system/monitor-config', {
+                    headers: authHeaders,
+                    credentials: 'include'
+                })
+                if (configRes.ok) {
+                    const configData = await configRes.json()
+                    if (configData && Array.isArray(configData.watchDirs)) {
+                        setMonitorConfig(configData)
+                    } else {
+                        console.error('Monitor config: unexpected response shape', configData)
+                        setConfigError('설정 데이터 형식이 올바르지 않습니다.')
+                    }
+                } else {
+                    const errBody = await configRes.text().catch(() => '')
+                    console.error('Monitor config fetch failed:', configRes.status, errBody)
+                    setConfigError(`설정 불러오기 실패 (${configRes.status})`)
                 }
             } catch (err) {
                 console.error('Failed to load page data', err)
@@ -67,13 +91,18 @@ export default function SettingsPage() {
 
     const [configSaved, setConfigSaved] = useState(false)
 
+    const getAuthHeaders = (): Record<string, string> => {
+        const token = Cookies.get('sb-access-token')
+        return token ? { 'Authorization': `Bearer ${token}` } : {}
+    }
+
     const handleSaveConfig = async () => {
         setIsSavingConfig(true)
         setConfigSaved(false)
         try {
             const res = await fetch('/api/admin/system/monitor-config', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                 body: JSON.stringify(monitorConfig),
                 credentials: 'include'
             })
@@ -83,7 +112,10 @@ export default function SettingsPage() {
             }
 
             // 저장 후 다시 불러와서 확인
-            const verifyRes = await fetch('/api/admin/system/monitor-config', { credentials: 'include' })
+            const verifyRes = await fetch('/api/admin/system/monitor-config', {
+                headers: getAuthHeaders(),
+                credentials: 'include'
+            })
             if (verifyRes.ok) {
                 const savedData = await verifyRes.json()
                 setMonitorConfig(savedData)
@@ -101,10 +133,10 @@ export default function SettingsPage() {
         }
     }
 
-    const addWatchDir = () => {
+    const addWatchDir = (centerName: string) => {
         setMonitorConfig(prev => ({
             ...prev,
-            watchDirs: [...prev.watchDirs, { center: '', path: '' }]
+            watchDirs: [...prev.watchDirs, { center: centerName, path: '' }]
         }))
     }
 
@@ -116,12 +148,18 @@ export default function SettingsPage() {
         })
     }
 
-    const updateWatchDir = (index: number, field: 'center' | 'path', value: string) => {
+    const updateWatchDirPath = (index: number, value: string) => {
         setMonitorConfig(prev => {
             const newDirs = [...prev.watchDirs]
-            newDirs[index] = { ...newDirs[index], [field]: value }
+            newDirs[index] = { ...newDirs[index], path: value }
             return { ...prev, watchDirs: newDirs }
         })
+    }
+
+    const getDirsForCenter = (centerName: string) => {
+        return monitorConfig.watchDirs
+            .map((dir, idx) => ({ ...dir, originalIndex: idx }))
+            .filter(dir => dir.center === centerName)
     }
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -173,7 +211,7 @@ export default function SettingsPage() {
         try {
             const res = await fetch('/api/admin/system/trigger-sync', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                 body: JSON.stringify({ center: activeCenter }),
                 credentials: 'include'
             })
@@ -200,7 +238,7 @@ export default function SettingsPage() {
         if (!confirm('정말로 모든 학생의 자료와 수업 기록을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
         setIsDeleting(true)
         try {
-            const res = await fetch('/api/admin/system/bulk-delete', { method: 'DELETE', credentials: 'include' })
+            const res = await fetch('/api/admin/system/bulk-delete', { method: 'DELETE', headers: getAuthHeaders(), credentials: 'include' })
             const data = await res.json()
             if (data.success) {
                 toast({ title: "삭제 완료", description: "모든 자료와 수업이 초기화되었습니다." })
@@ -280,50 +318,76 @@ export default function SettingsPage() {
             {/* Monitor Config Section */}
             <Card className="shadow-sm">
                 <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                        <span>센터별 모니터 폴더 관리</span>
-                        <Button variant="outline" size="sm" onClick={addWatchDir}>+ 폴더 추가</Button>
-                    </CardTitle>
-                    <CardDescription>동기화할 구글 드라이브/원드라이브 폴더의 절대 경로를 각 센터별로 지정합니다.</CardDescription>
+                    <CardTitle>센터별 모니터 폴더 관리</CardTitle>
+                    <CardDescription>각 센터별로 동기화할 폴더의 절대 경로를 지정합니다.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     {configLoading ? (
                         <div className="py-8 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                    ) : configError ? (
+                        <div className="py-4 px-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+                            <p className="text-sm text-destructive flex items-center gap-2">
+                                <AlertTriangle className="h-4 w-4 shrink-0" />
+                                {configError}
+                            </p>
+                            <Button variant="outline" size="sm" className="mt-2" onClick={() => window.location.reload()}>
+                                새로고침
+                            </Button>
+                        </div>
                     ) : (
-                        <div className="space-y-4">
-                            {monitorConfig.watchDirs.length === 0 ? (
-                                <p className="text-sm text-center text-muted-foreground py-4 border border-dashed rounded-lg">등록된 감시 폴더가 없습니다.</p>
+                        <div className="space-y-6">
+                            {centers.length === 0 ? (
+                                <p className="text-sm text-center text-muted-foreground py-4 border border-dashed rounded-lg">등록된 센터가 없습니다. 센터 관리에서 먼저 센터를 추가하세요.</p>
                             ) : (
-                                <div className="space-y-3">
-                                    {monitorConfig.watchDirs.map((dir, idx) => (
-                                        <div key={idx} className="flex gap-2 items-start">
-                                            <div className="w-1/3">
-                                                <Input
-                                                    placeholder="센터명 (예: 동래 의대관)"
-                                                    value={dir.center}
-                                                    onChange={(e) => updateWatchDir(idx, 'center', e.target.value)}
-                                                />
+                                centers.map(center => {
+                                    const dirs = getDirsForCenter(center.name)
+                                    return (
+                                        <div key={center.id} className="border rounded-lg p-4 space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <h4 className="font-medium flex items-center gap-2">
+                                                    <FolderOpen className="h-4 w-4 text-primary" />
+                                                    {center.name}
+                                                </h4>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => addWatchDir(center.name)}
+                                                >
+                                                    <Plus className="h-3.5 w-3.5 mr-1" />
+                                                    폴더 추가
+                                                </Button>
                                             </div>
-                                            <div className="flex-1">
-                                                <Input
-                                                    placeholder="폴더 절대 경로 (예: D:\OneDrive\강의실)"
-                                                    value={dir.path}
-                                                    onChange={(e) => updateWatchDir(idx, 'path', e.target.value)}
-                                                />
-                                            </div>
-                                            <Button variant="destructive" size="icon" onClick={() => removeWatchDir(idx)}>
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
+                                            {dirs.length === 0 ? (
+                                                <p className="text-xs text-muted-foreground py-3 text-center border border-dashed rounded">
+                                                    등록된 폴더가 없습니다.
+                                                </p>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    {dirs.map((dir) => (
+                                                        <div key={dir.originalIndex} className="flex gap-2 items-center">
+                                                            <div className="flex-1">
+                                                                <Input
+                                                                    placeholder="폴더 절대 경로 (예: D:\OneDrive\강의실)"
+                                                                    value={dir.path}
+                                                                    onChange={(e) => updateWatchDirPath(dir.originalIndex, e.target.value)}
+                                                                />
+                                                            </div>
+                                                            <Button variant="destructive" size="icon" onClick={() => removeWatchDir(dir.originalIndex)}>
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <p className="text-xs text-muted-foreground">{dirs.length}개 폴더</p>
                                         </div>
-                                    ))}
-                                </div>
+                                    )
+                                })
                             )}
 
                             <div className="flex items-center justify-between pt-4 border-t">
                                 <p className="text-xs text-muted-foreground">
-                                    {monitorConfig.watchDirs.length > 0
-                                        ? `${monitorConfig.watchDirs.length}개 폴더 등록됨`
-                                        : '등록된 폴더 없음'}
+                                    전체 {monitorConfig.watchDirs.length}개 폴더 등록됨
                                 </p>
                                 <Button
                                     onClick={handleSaveConfig}

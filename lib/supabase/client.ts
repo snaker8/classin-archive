@@ -10,7 +10,7 @@ export interface Profile {
   id: string
   email: string
   full_name: string
-  role: 'student' | 'teacher' | 'manager' | 'super_manager' | 'admin'
+  role: 'student' | 'teacher' | 'manager' | 'super_manager' | 'admin' | 'parent'
   center?: string
   created_at: string
   updated_at: string

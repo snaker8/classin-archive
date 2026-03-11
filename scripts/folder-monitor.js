@@ -494,7 +494,8 @@ async function processVideo(filePath, rootDir, fileName) {
                 student_id: studentId,
                 title: targetClassTitle,
                 class_date: classDate,
-                created_by: adminId || studentId
+                created_by: adminId || studentId,
+                ...(groupId ? { group_id: groupId } : {})
             }).select().single();
 
             if (error) {

@@ -7,6 +7,7 @@ import { Class, Material } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { motion, AnimatePresence } from 'framer-motion'
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch'
 import {
   ChevronLeft,
   ChevronRight,
@@ -46,6 +47,50 @@ const HTMLFlipBook = dynamic(
   }
 ) as any
 
+// Zoomable Image Component - 터치하여 바로 확대 가능
+const ZoomableImage = ({ src, alt, className: imgClassName }: { src: string; alt: string; className?: string }) => {
+  const [isZoomed, setIsZoomed] = useState(false)
+
+  return (
+    <TransformWrapper
+      initialScale={1}
+      minScale={1}
+      maxScale={5}
+      doubleClick={{ mode: 'toggle', step: 2.5 }}
+      pinch={{ step: 5 }}
+      wheel={{ step: 0.1 }}
+      panning={{ disabled: !isZoomed }}
+      alignmentAnimation={{ disabled: true }}
+      velocityAnimation={{ disabled: true }}
+      onTransformed={(_, { scale }) => setIsZoomed(scale > 1.05)}
+    >
+      {({ resetTransform }) => (
+        <div className="relative" style={{ touchAction: isZoomed ? 'none' : 'pan-y' }}>
+          {isZoomed && (
+            <button
+              onClick={() => resetTransform()}
+              className="absolute top-2 right-2 z-20 bg-black/60 text-white backdrop-blur-md rounded-full p-1.5 shadow-lg"
+            >
+              <RotateCcw className="h-4 w-4" />
+            </button>
+          )}
+          <TransformComponent
+            wrapperStyle={{ width: '100%', touchAction: isZoomed ? 'none' : 'pan-y' }}
+            contentStyle={{ width: '100%' }}
+          >
+            <img
+              src={src}
+              alt={alt}
+              className={imgClassName || "w-full h-auto"}
+              draggable={false}
+            />
+          </TransformComponent>
+        </div>
+      )}
+    </TransformWrapper>
+  )
+}
+
 // Lazy Image Component - 모바일 최적화됨
 const VisibleImage = ({ src, index }: { src: string; index: number }) => {
   const [isVisible, setIsVisible] = useState(false)
@@ -73,7 +118,7 @@ const VisibleImage = ({ src, index }: { src: string; index: number }) => {
       className="relative w-full bg-white shadow-md rounded-xl overflow-hidden border"
       style={{ minHeight: '200px' }}
     >
-      <div className="absolute top-2 left-2 bg-primary text-white px-2.5 py-0.5 rounded-full text-xs font-bold z-10 shadow-sm">
+      <div className="absolute top-2 left-2 bg-primary text-white px-2.5 py-0.5 rounded-full text-xs font-bold z-20 shadow-sm">
         {index + 1}
       </div>
 
@@ -85,14 +130,18 @@ const VisibleImage = ({ src, index }: { src: string; index: number }) => {
               <p className="text-sm">페이지 {index + 1} 로딩 중...</p>
             </div>
           )}
-          <img
-            src={src}
-            alt={`Page ${index + 1}`}
-            className="w-full h-auto"
-            style={{ display: loaded ? 'block' : 'none' }}
-            loading="eager"
-            onLoad={() => setLoaded(true)}
-          />
+          <div style={{ display: loaded ? 'block' : 'none' }}>
+            <ZoomableImage src={src} alt={`Page ${index + 1}`} />
+          </div>
+          {/* Hidden img for onLoad detection */}
+          {!loaded && (
+            <img
+              src={src}
+              alt=""
+              className="hidden"
+              onLoad={() => setLoaded(true)}
+            />
+          )}
         </>
       ) : (
         <div className="flex items-center justify-center p-16 text-muted-foreground bg-muted/30">
@@ -161,7 +210,6 @@ export default function ViewerPage() {
 
   // 뷰 모드: 모바일은 scroll이 기본
   const [viewMode, setViewMode] = useState<'flip' | 'scroll'>('scroll')
-  const [zoomedImage, setZoomedImage] = useState<string | null>(null)
   const [viewContext, setViewContext] = useState<'student' | 'teacher' | 'compare'>('compare')
   const [activeVideo, setActiveVideo] = useState<string | null>(null)
   const [videoWidth, setVideoWidth] = useState(400)
@@ -548,40 +596,7 @@ export default function ViewerPage() {
         </div>
       )}
 
-      {/* Zoom Modal */}
-      <AnimatePresence>
-        {zoomedImage && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out"
-            onClick={() => setZoomedImage(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="relative max-w-full max-h-full"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <img
-                src={zoomedImage}
-                alt="Zoomed"
-                className="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain"
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute -top-12 right-0 text-white hover:bg-white/10"
-                onClick={() => setZoomedImage(null)}
-              >
-                <X className="h-8 w-8" />
-              </Button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Zoom modal removed - inline pinch-to-zoom on each image */}
 
 
       {/* 메인 컨텐츠 */}
@@ -602,7 +617,7 @@ export default function ViewerPage() {
                       <div className="p-2.5 border-b border-white/5 bg-white/5 flex items-center justify-between">
                         <span className="text-xs font-bold text-gray-300 font-mono tracking-wide">PAGE {index + 1}</span>
                         <span className="flex items-center gap-2 text-[10px] text-gray-400">
-                          <Maximize2 className="h-3 w-3" /> 클릭하여 크게 보기
+                          <ZoomIn className="h-3 w-3" /> 터치하여 확대
                         </span>
                       </div>
                       {/* 모바일: 세로 스택, 데스크탑: 가로 나란히 */}
@@ -618,11 +633,8 @@ export default function ViewerPage() {
                               <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">학생 판서</span>
                             </div>
                             {group.student ? (
-                              <div className="relative group/img cursor-zoom-in" onClick={() => setZoomedImage(group.student?.content_url || null)}>
-                                <img src={group.student.content_url} className="w-full h-auto rounded-lg shadow-sm border border-white/5" alt="Student board" />
-                                <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors rounded-lg flex items-center justify-center opacity-0 group-hover/img:opacity-100">
-                                  <Maximize2 className="h-5 w-5 text-white" />
-                                </div>
+                              <div className="rounded-lg overflow-hidden border border-white/5">
+                                <ZoomableImage src={group.student.content_url} alt="Student board" className="w-full h-auto" />
                               </div>
                             ) : (
                               <div className="flex-1 min-h-[200px] rounded-lg bg-white/5 border border-dashed border-white/10 flex items-center justify-center text-gray-500 text-[11px] text-center p-4">
@@ -640,11 +652,8 @@ export default function ViewerPage() {
                               <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">선생님 판서</span>
                             </div>
                             {group.teacher ? (
-                              <div className="relative group/img cursor-zoom-in" onClick={() => setZoomedImage(group.teacher?.content_url || null)}>
-                                <img src={group.teacher.content_url} className="w-full h-auto rounded-lg shadow-sm border border-white/5" alt="Teacher board" />
-                                <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors rounded-lg flex items-center justify-center opacity-0 group-hover/img:opacity-100">
-                                  <Maximize2 className="h-5 w-5 text-white" />
-                                </div>
+                              <div className="rounded-lg overflow-hidden border border-white/5">
+                                <ZoomableImage src={group.teacher.content_url} alt="Teacher board" className="w-full h-auto" />
                               </div>
                             ) : (
                               <div className="flex-1 min-h-[200px] rounded-lg bg-white/5 border border-dashed border-white/10 flex items-center justify-center text-gray-500 text-[11px] text-center p-4">
@@ -659,13 +668,8 @@ export default function ViewerPage() {
                 ))
               ) : (
                 currentImages.map((image: any, index: number) => (
-                  <div id={`page-${index}`} key={image.id} className="group relative cursor-zoom-in" onClick={() => setZoomedImage(image.content_url)}>
+                  <div id={`page-${index}`} key={image.id}>
                     <VisibleImage src={image.content_url} index={index} />
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors rounded-xl flex items-center justify-center">
-                      <div className="bg-black/60 backdrop-blur-md p-3 rounded-full opacity-0 group-hover:opacity-100 transition-all scale-90 group-hover:scale-100">
-                        <Maximize2 className="h-6 w-6 text-white" />
-                      </div>
-                    </div>
                   </div>
                 ))
               )}

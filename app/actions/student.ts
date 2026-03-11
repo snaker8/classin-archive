@@ -9,6 +9,9 @@ export async function createStudent(prevState: any, formData: FormData) {
     const phoneNumber = formData.get('phoneNumber') as string
     const password = formData.get('password') as string
     const fullName = formData.get('fullName') as string
+    const grade = formData.get('grade') as string || ''
+    const school = formData.get('school') as string || ''
+    const parentPhone = formData.get('parentPhone') as string || ''
 
     if (!phoneNumber || !password || !fullName) {
         return { error: '모든 필드를 입력해주세요.' }
@@ -43,7 +46,10 @@ export async function createStudent(prevState: any, formData: FormData) {
             id: authData.user.id,
             email,
             full_name: fullName,
-            role: 'student'
+            role: 'student',
+            ...(grade ? { grade } : {}),
+            ...(school ? { school } : {}),
+            ...(parentPhone ? { parent_phone: parentPhone.replace(/[-\s]/g, '') } : {})
         }
 
         if (requesterProfile.role !== 'super_manager' && !(requesterProfile.role === 'admin' && requesterProfile.center === '전체')) {
@@ -57,6 +63,11 @@ export async function createStudent(prevState: any, formData: FormData) {
             .upsert(profileData)
 
         if (profileError) throw profileError
+
+        // Create parent account if parent phone provided
+        if (parentPhone) {
+            await ensureParentAccount(parentPhone.replace(/[-\s]/g, ''), profileData.center)
+        }
 
         revalidatePath('/admin/dashboard')
         revalidatePath('/admin/students')
@@ -102,7 +113,7 @@ export async function deleteStudent(studentId: string) {
     }
 }
 
-export async function updateStudent(studentId: string, data: { fullName?: string; password?: string; center?: string; hall?: string }) {
+export async function updateStudent(studentId: string, data: { fullName?: string; password?: string; center?: string; hall?: string; grade?: string; school?: string; parentPhone?: string }) {
     try {
         // Security check: ensure user has access to this student's center
         const { data: student } = await supabaseAdmin
@@ -128,6 +139,9 @@ export async function updateStudent(studentId: string, data: { fullName?: string
         if (data.fullName) updateData.full_name = data.fullName
         if (data.center !== undefined) updateData.center = data.center
         if (data.hall !== undefined) updateData.hall = data.hall
+        if (data.grade !== undefined) updateData.grade = data.grade
+        if (data.school !== undefined) updateData.school = data.school
+        if (data.parentPhone !== undefined) updateData.parent_phone = data.parentPhone.replace(/[-\s]/g, '')
 
         if (Object.keys(updateData).length > 0) {
             // Also check access if they are moving student to a NEW center
@@ -141,6 +155,11 @@ export async function updateStudent(studentId: string, data: { fullName?: string
                 .eq('id', studentId)
 
             if (profileError) throw profileError
+
+            // Create parent account if parent phone provided/changed
+            if (data.parentPhone) {
+                await ensureParentAccount(data.parentPhone.replace(/[-\s]/g, ''), data.center || student?.center)
+            }
 
             // Also update metadata in auth to keep in sync if name changed
             if (data.fullName) {
@@ -276,5 +295,82 @@ export async function getStudentDetails(studentId: string) {
     } catch (error: any) {
         console.error('Error fetching student details:', error)
         return { error: '학생 정보를 불러오는데 실패했습니다.' }
+    }
+}
+
+// ===== Parent Account Helpers =====
+
+async function ensureParentAccount(cleanPhone: string, center?: string) {
+    if (!cleanPhone) return
+    const email = `${cleanPhone}@parent.local`
+
+    try {
+        // Check if parent auth user already exists
+        const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1 })
+        // listUsers doesn't support email filter well, so check via profiles
+        const { data: existingProfile } = await supabaseAdmin
+            .from('profiles')
+            .select('id')
+            .eq('email', email)
+            .single()
+
+        if (existingProfile) return // Already exists
+
+        // Create auth user for parent
+        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+            email,
+            password: cleanPhone, // Default password = phone number
+            email_confirm: true,
+            user_metadata: { full_name: '학부모', phone_number: cleanPhone }
+        })
+
+        if (authError) {
+            // If user already exists in auth but not in profiles, just log it
+            if (authError.message?.includes('already been registered')) return
+            throw authError
+        }
+
+        if (authData.user) {
+            await supabaseAdmin.from('profiles').upsert({
+                id: authData.user.id,
+                email,
+                full_name: '학부모',
+                role: 'parent',
+                ...(center ? { center } : {})
+            })
+        }
+    } catch (error) {
+        console.error('Error creating parent account:', error)
+        // Don't throw - parent account creation failure shouldn't block student creation
+    }
+}
+
+export async function getParentChildren() {
+    try {
+        const cookieStore = cookies()
+        const token = cookieStore.get('sb-access-token')?.value
+        if (!token) return { children: [] }
+
+        const { data: { user } } = await supabaseAdmin.auth.getUser(token)
+        if (!user) return { children: [] }
+
+        // Get parent's phone from email
+        const parentEmail = user.email || ''
+        if (!parentEmail.endsWith('@parent.local')) return { children: [] }
+        const parentPhone = parentEmail.replace('@parent.local', '')
+
+        // Find all students with this parent_phone
+        const { data: children, error } = await supabaseAdmin
+            .from('profiles')
+            .select('id, full_name, grade, school, center, hall')
+            .eq('parent_phone', parentPhone)
+            .eq('role', 'student')
+            .order('full_name')
+
+        if (error) throw error
+        return { children: children || [] }
+    } catch (error: any) {
+        console.error('Error fetching parent children:', error)
+        return { children: [] }
     }
 }

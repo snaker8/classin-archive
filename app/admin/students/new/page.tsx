@@ -93,6 +93,35 @@ export default function NewStudentPage() {
               />
             </div>
 
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">학년</label>
+                <Input
+                  name="grade"
+                  placeholder="예: 중3, 고1"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">학교</label>
+                <Input
+                  name="school"
+                  placeholder="예: OO중학교"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">학부모 전화번호</label>
+              <Input
+                type="tel"
+                name="parentPhone"
+                placeholder="01098765432"
+              />
+              <p className="text-xs text-muted-foreground">
+                학부모가 이 번호로 로그인하여 학습현황을 확인할 수 있습니다
+              </p>
+            </div>
+
             <div className="flex justify-end space-x-2 pt-4">
               <Button
                 type="button"

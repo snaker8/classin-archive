@@ -22,7 +22,7 @@ import { Upload, Loader2, Video, CheckCircle2, AlertCircle, X, FileVideo, Calend
 import { useDropzone } from 'react-dropzone'
 import { supabase } from '@/lib/supabase/client'
 import { getAllClasses } from '@/app/actions/class'
-import { registerManualVideoBatch } from '@/app/actions/video-archive'
+import { getSignedUploadUrl, registerManualVideoBatch } from '@/app/actions/video-archive'
 import { useToast } from '@/components/ui/use-toast'
 import { cn, formatDate } from '@/lib/utils'
 import { format } from 'date-fns'
@@ -32,6 +32,13 @@ interface VideoUploadDialogProps {
     open: boolean
     onOpenChange: (open: boolean) => void
     onSuccess: () => void
+}
+
+// Sanitize filename for Supabase Storage
+function sanitizeFilename(name: string): string {
+    return name
+        .replace(/[^\w.\-]/g, '_')
+        .replace(/_+/g, '_')
 }
 
 export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUploadDialogProps) {
@@ -57,28 +64,25 @@ export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUpload
         if (open && date) {
             loadClasses(date)
         } else if (!open) {
-            // Reset state on close
             setFiles([])
             setSelectedClassId('')
             setUploadStep('idle')
             setProgress(0)
             setErrorMessage('')
-            // Don't reset date to keep context
         }
     }, [open, date])
 
     async function loadClasses(selectedDate: Date) {
         setLoadingClasses(true)
-        setSelectedClassId('') // Reset selection
+        setSelectedClassId('')
         try {
             const dateStr = format(selectedDate, 'yyyy-MM-dd')
-            // increase limit to ensure we get all students for a class on a single day
             const res = await getAllClasses({ limit: 500, date: dateStr })
             if (res.classes) {
                 const groups = res.classes.reduce((acc: any, cls: any) => {
                     if (!acc[cls.title]) {
                         acc[cls.title] = {
-                            id: cls.id, // Use the first class's ID to represent the group
+                            id: cls.id,
                             title: cls.title,
                             created_at: cls.created_at,
                             studentCount: 0,
@@ -130,93 +134,44 @@ export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUpload
         setUploadStep('uploading')
         setProgress(0)
         setErrorMessage('')
-        console.log(`[VideoUploadDialog] Starting upload process... (Version: ${new Date().toISOString()})`)
 
         try {
-            // DB expects batch_id to be UUID
             const batchId = crypto.randomUUID()
             const uploadedFiles: { path: string, name: string }[] = []
-
-            const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks
-            const totalSize = files.reduce((acc, f) => acc + f.size, 0);
-            let totalUploaded = 0;
-
-            // 현재 세션 토큰 가져오기 (만료 대비 캐싱)
-            const { data: { session } } = await supabase.auth.getSession();
-            let currentToken = session?.access_token;
+            const totalSize = files.reduce((acc, f) => acc + f.size, 0)
+            let totalUploaded = 0
 
             for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-                let lastResult;
+                const file = files[i]
+                const safeName = sanitizeFilename(file.name)
+                const storagePath = `manual/${selectedClassId}/${batchId}/${safeName}`
 
-                for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-                    const start = chunkIndex * CHUNK_SIZE;
-                    const end = Math.min(start + CHUNK_SIZE, file.size);
-                    const chunk = file.slice(start, end);
-
-                    const formData = new FormData();
-                    formData.append('chunk', chunk);
-                    formData.append('chunkIndex', chunkIndex.toString());
-                    formData.append('totalChunks', totalChunks.toString());
-                    formData.append('chunkSize', CHUNK_SIZE.toString());
-                    formData.append('filename', file.name);
-                    formData.append('batchId', batchId);
-                    formData.append('classId', selectedClassId);
-
-                    let uploadRes = await fetch('/api/upload/chunk', {
-                        method: 'POST',
-                        body: formData,
-                        headers: currentToken ? {
-                            'Authorization': `Bearer ${currentToken}`
-                        } : undefined
-                    });
-
-                    // 401 만료 시 자동 세션 갱신 및 재시도
-                    if (uploadRes.status === 401) {
-                        console.log(`[Upload] Chunk ${chunkIndex} got 401. Refreshing session...`);
-                        const { data: sessionData, error: sessionError } = await supabase.auth.refreshSession();
-
-                        if (sessionError || !sessionData.session) {
-                            throw new Error('로그인 세션이 만료되어 갱신에 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
-                        }
-
-                        currentToken = sessionData.session.access_token;
-
-                        // 일정 시간 지연 후 쿠키가 완전히 세팅되도록 기다림
-                        await new Promise(resolve => setTimeout(resolve, 500));
-
-                        uploadRes = await fetch('/api/upload/chunk', {
-                            method: 'POST',
-                            body: formData,
-                            headers: {
-                                'Authorization': `Bearer ${currentToken}`
-                            }
-                        });
-                    }
-
-                    if (!uploadRes.ok) {
-                        const errorText = await uploadRes.text();
-                        console.error(`[Upload] Chunk ${chunkIndex} failed:`, { status: uploadRes.status, text: errorText });
-                        throw new Error(`파일 업로드 실패 (${file.name}, 조각 ${chunkIndex + 1}/${totalChunks}): Status ${uploadRes.status}`);
-                    }
-
-                    lastResult = await uploadRes.json();
-
-                    totalUploaded += (end - start);
-                    setProgress(Math.round((totalUploaded / totalSize) * 100));
+                // 1. Get signed upload URL from server
+                const urlRes = await getSignedUploadUrl(storagePath)
+                if (urlRes.error || !urlRes.token) {
+                    throw new Error(`업로드 URL 생성 실패: ${urlRes.error}`)
                 }
 
-                if (!lastResult || !lastResult.success || !lastResult.path) {
-                    throw new Error(`서버 응답 오류 (${file.name}): 업로드 완료 확인 실패`);
+                // 2. Upload directly to Supabase Storage using signed URL
+                const { error: uploadError } = await supabase.storage
+                    .from('raw-videos')
+                    .uploadToSignedUrl(storagePath, urlRes.token, file, {
+                        contentType: file.type || 'video/mp4',
+                        upsert: true,
+                    })
+
+                if (uploadError) {
+                    throw new Error(`파일 업로드 실패 (${file.name}): ${uploadError.message}`)
                 }
 
-                uploadedFiles.push({ path: lastResult.localPath, name: file.name });
+                totalUploaded += file.size
+                setProgress(Math.round((totalUploaded / totalSize) * 100))
+                uploadedFiles.push({ path: storagePath, name: file.name })
             }
 
             setUploadStep('processing')
 
-            // 3. Register Batch in DB
+            // 3. Register batch in DB
             const regRes = await registerManualVideoBatch(selectedClassId, batchId, uploadedFiles)
             if (regRes.error) throw new Error(regRes.error)
 
@@ -373,14 +328,7 @@ export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUpload
                                                     <FileVideo className="h-4 w-4 text-indigo-600" />
                                                 </div>
                                                 <div className="truncate">
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="font-medium truncate max-w-[300px]">{file.name}</p>
-                                                        {file.size > 30 * 1024 * 1024 && (
-                                                            <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
-                                                                <FileVideo className="h-3 w-3" /> 대용량 청크 방식
-                                                            </span>
-                                                        )}
-                                                    </div>
+                                                    <p className="font-medium truncate max-w-[300px]">{file.name}</p>
                                                     <p className="text-xs text-muted-foreground">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
                                                 </div>
                                             </div>
@@ -405,7 +353,7 @@ export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUpload
                         <div className="space-y-2 p-4 bg-indigo-50 rounded-lg border border-indigo-100">
                             <div className="flex items-center justify-between text-sm mb-1">
                                 <span className="text-indigo-700 font-medium flex items-center gap-2">
-                                    <Loader2 className="h-4 w-4 animate-spin" /> 파일 업로드 중...
+                                    <Loader2 className="h-4 w-4 animate-spin" /> Supabase Storage로 직접 업로드 중...
                                 </span>
                                 <span className="text-indigo-600 font-bold">{progress}%</span>
                             </div>

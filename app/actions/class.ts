@@ -3,7 +3,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { unstable_noStore as noStore } from 'next/cache'
 import { cookies } from 'next/headers'
-import { getServerSession, requireRole, requireCenterAccess } from '@/lib/supabase/server'
+import { getServerSession, getServerProfile, requireRole, requireCenterAccess } from '@/lib/supabase/server'
 
 // Helper to generate signed URL
 async function signStorageUrl(url: string) {
@@ -262,17 +262,26 @@ export async function getStudentClasses(studentId: string) {
         const session = await getServerSession()
         if (!session) return { error: '로그인이 필요합니다.' }
 
-        // 1. Security Check: Get target student's center
+        // 1. Security Check: Get target student's profile
         const { data: studentProfile, error: profileErr } = await supabaseAdmin
             .from('profiles')
-            .select('center')
+            .select('center, parent_phone')
             .eq('id', studentId)
             .single()
 
         if (profileErr || !studentProfile) throw new Error('학생 정보를 찾을 수 없습니다.')
 
-        // Ensure requester has access to this student's center
-        await requireCenterAccess(studentProfile.center)
+        // Check if requester is a parent of this student
+        const requesterProfile = await getServerProfile()
+        if (requesterProfile?.role === 'parent') {
+            const parentPhone = requesterProfile.email?.replace('@parent.local', '')
+            if (!parentPhone || studentProfile.parent_phone !== parentPhone) {
+                throw new Error('해당 학생의 학부모가 아닙니다.')
+            }
+        } else {
+            // Ensure requester has access to this student's center
+            await requireCenterAccess(studentProfile.center)
+        }
 
         // 2. Fetch classes for student
         const { data: classesData, error: classesError } = await supabaseAdmin
@@ -462,7 +471,8 @@ export async function createClassForGroup(groupId: string, data: { title: string
             student_id: m.student_id,
             title: data.title,
             description: data.description,
-            class_date: data.class_date
+            class_date: data.class_date,
+            group_id: groupId
         }))
 
         // 3. Batch insert classes

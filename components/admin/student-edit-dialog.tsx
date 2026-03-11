@@ -34,6 +34,9 @@ export function StudentEditDialog({ student, onSuccess, trigger }: StudentEditDi
     const [password, setPassword] = useState('')
     const [center, setCenter] = useState((student as any).center || '')
     const [hall, setHall] = useState((student as any).hall || '')
+    const [grade, setGrade] = useState((student as any).grade || '')
+    const [school, setSchool] = useState((student as any).school || '')
+    const [parentPhone, setParentPhone] = useState((student as any).parent_phone || '')
     const [availableCenters, setAvailableCenters] = useState<any[]>([])
 
     const { toast } = useToast()
@@ -55,7 +58,10 @@ export function StudentEditDialog({ student, onSuccess, trigger }: StudentEditDi
                 fullName: fullName !== student.full_name ? fullName : undefined,
                 password: password || undefined,
                 center: center !== (student as any).center ? center : undefined,
-                hall: hall !== (student as any).hall ? hall : undefined
+                hall: hall !== (student as any).hall ? hall : undefined,
+                grade: grade !== (student as any).grade ? grade : undefined,
+                school: school !== (student as any).school ? school : undefined,
+                parentPhone: parentPhone !== (student as any).parent_phone ? parentPhone : undefined
             })
 
             if (result.error) {
@@ -152,6 +158,43 @@ export function StudentEditDialog({ student, onSuccess, trigger }: StudentEditDi
                                     <option key={h.id} value={h.name}>{h.name}</option>
                                 ))}
                             </select>
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="grade" className="text-right">
+                                학년
+                            </Label>
+                            <Input
+                                id="grade"
+                                value={grade}
+                                onChange={(e) => setGrade(e.target.value)}
+                                placeholder="예: 중3, 고1"
+                                className="col-span-3"
+                            />
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="school" className="text-right">
+                                학교
+                            </Label>
+                            <Input
+                                id="school"
+                                value={school}
+                                onChange={(e) => setSchool(e.target.value)}
+                                placeholder="예: OO중학교"
+                                className="col-span-3"
+                            />
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="parentPhone" className="text-right">
+                                학부모 번호
+                            </Label>
+                            <Input
+                                id="parentPhone"
+                                type="tel"
+                                value={parentPhone}
+                                onChange={(e) => setParentPhone(e.target.value)}
+                                placeholder="01098765432"
+                                className="col-span-3"
+                            />
                         </div>
                         <div className="grid grid-cols-4 items-center gap-4">
                             <Label htmlFor="password" className="text-right">

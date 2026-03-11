@@ -85,29 +85,38 @@ export async function getDashboardData(centerParam?: string, hallParam?: string)
 
         const { count: classCount } = await classCountQuery
 
-        // Instead of exact counting which inflates by student count, we fetch content_urls
-        // to count unique distinct materials/videos distributed
         // Count unique materials by content_url to avoid inflating by student count
         // (e.g. a group class with 10 students sharing the same blackboard = 1, not 10)
-        let materialsQuery = supabaseAdmin
-            .from('materials')
-            .select('content_url, type, class:classes!inner(student:profiles!classes_student_id_fkey!inner(center, hall))')
+        // Paginate to handle Supabase default 1000 row limit
+        let allMaterialsData: { content_url: string | null; type: string }[] = []
+        let matPage = 0
+        const matPageSize = 1000
+        while (true) {
+            let materialsQuery = supabaseAdmin
+                .from('materials')
+                .select('content_url, type, class:classes!inner(student:profiles!classes_student_id_fkey!inner(center, hall))')
 
-        if (center && center !== '전체') {
-            materialsQuery = materialsQuery.eq('class.student.center', center)
+            if (center && center !== '전체') {
+                materialsQuery = materialsQuery.eq('class.student.center', center)
+            }
+            if (hall && hall !== '전체') {
+                materialsQuery = materialsQuery.eq('class.student.hall', hall)
+            }
+
+            const { data, error: matError } = await materialsQuery
+                .range(matPage * matPageSize, (matPage + 1) * matPageSize - 1)
+
+            if (matError) throw matError
+            if (!data || data.length === 0) break
+            allMaterialsData = allMaterialsData.concat(data as any)
+            if (data.length < matPageSize) break
+            matPage++
         }
-        if (hall && hall !== '전체') {
-            materialsQuery = materialsQuery.eq('class.student.hall', hall)
-        }
-
-        const { data: allMaterialsData, error: allMaterialsError } = await materialsQuery
-
-        if (allMaterialsError) throw allMaterialsError
 
         const uniqueVideos = new Set<string>()
         const uniqueBlackboards = new Set<string>()
 
-        for (const m of (allMaterialsData || [])) {
+        for (const m of allMaterialsData) {
             if (!m.content_url) continue
             if (m.type === 'video_link') {
                 uniqueVideos.add(m.content_url)
