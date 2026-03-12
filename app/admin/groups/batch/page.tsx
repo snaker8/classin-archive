@@ -32,7 +32,7 @@ export default function BatchClassPage() {
     // Load students and teachers
     useEffect(() => {
         const loadData = async () => {
-            const { data: studentData } = await supabase.from('profiles').select('*').eq('role', 'student')
+            const { data: studentData } = await supabase.from('profiles').select('*').eq('role', 'student').eq('status', 'active')
             if (studentData) setStudents(studentData)
 
             const { getTeachers } = await import('@/app/actions/teacher')

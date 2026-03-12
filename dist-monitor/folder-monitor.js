@@ -366,6 +366,16 @@ async function processImage(filePath, rootDir, fileName, centerName) {
         return;
     }
 
+    // 이름 유효성 검사: 한글 2~4자만 사람 이름으로 인식
+    const isValidName = /^[가-힣]{2,4}$/.test(studentName);
+    // 교재/판서 파일명 키워드 필터
+    const isMaterialFile = /판서|교재|바이블|유형|개념|차시|정답|해설|시험|모의고사|학습용|블랙보드/.test(namePart);
+
+    if (!isValidName || isMaterialFile) {
+        console.log(`[SKIP] Not a person name: '${studentName}' (file: ${fileName})`);
+        return;
+    }
+
     try {
         // 1. 선생님 이름 먼저 체크 (선생님 판서는 모든 학생에게 공유되므로 우선 확인)
         const teacherData = await findTeacher(studentName);
@@ -379,13 +389,13 @@ async function processImage(filePath, rootDir, fileName, centerName) {
             .from('profiles')
             .select('id, full_name')
             .eq('role', 'student')
+            .eq('status', 'active')
             .ilike('full_name', `%${studentName}%`)
             .limit(1);
 
         if (!profiles || profiles.length === 0) {
-            // 학생도 선생님도 아닌 파일 → 공통 판서 자료로 해당 반 전체 학생에게 배포
-            console.log(`[COMMON MATERIAL] '${studentName}' is not a student or teacher. Distributing to all students in group.`);
-            await processCommonImage(filePath, rootDir, fileName, groupCode, subType, classDate, centerName);
+            // 미가입 학생 → 건너뛰기 (가입 후 재스캔하면 개인 판서로 정상 배포됨)
+            console.log(`[SKIP-UNREGISTERED] '${studentName}' is not registered. Will be processed after registration + rescan.`);
             return;
         }
         const student = profiles[0];
@@ -803,31 +813,31 @@ async function scanForSiblingTeacherBoards(classId, folderPath, className, class
 
                 console.log(`   -> Found detected teacher sibling: ${imgFile}. Linking...`);
 
-                // Find uploaded content_url in _shared/teachers
-                // We look for any material with this title that has type 'teacher_blackboard_image'
-                const { data: existingMaterials } = await supabase
-                    .from('materials')
+                // teacher_board_master에서 같은 날짜의 URL 찾기 (날짜 정확 매칭)
+                let contentUrl;
+                const { data: masterBoards } = await supabase
+                    .from('teacher_board_master')
                     .select('content_url')
-                    .eq('title', imgFile)
-                    .eq('type', 'teacher_blackboard_image')
+                    .eq('filename', imgFile)
+                    .eq('class_date', classDate)
                     .limit(1);
 
-                let contentUrl;
-                if (existingMaterials && existingMaterials.length > 0) {
-                    contentUrl = existingMaterials[0].content_url;
+                if (masterBoards && masterBoards.length > 0) {
+                    contentUrl = masterBoards[0].content_url;
                 } else {
-                    // teacher_board_master에서 URL 찾기
-                    const { data: masterBoards } = await supabase
-                        .from('teacher_board_master')
-                        .select('content_url')
-                        .eq('filename', imgFile)
-                        .eq('class_date', classDate)
+                    // master에 없으면 같은 날짜 같은 수업의 다른 학생 class에서 찾기
+                    const { data: sameDateMaterials } = await supabase
+                        .from('materials')
+                        .select('content_url, class:classes!inner(class_date)')
+                        .eq('title', imgFile)
+                        .eq('type', 'teacher_blackboard_image')
+                        .eq('class.class_date', classDate)
                         .limit(1);
 
-                    if (masterBoards && masterBoards.length > 0) {
-                        contentUrl = masterBoards[0].content_url;
+                    if (sameDateMaterials && sameDateMaterials.length > 0) {
+                        contentUrl = sameDateMaterials[0].content_url;
                     } else {
-                        console.log(`      Teacher board not on server yet. Skipping sibling link.`);
+                        console.log(`      Teacher board not on server yet for ${classDate}. Skipping sibling link.`);
                         continue;
                     }
                 }
@@ -979,6 +989,65 @@ async function main() {
             }
         });
     });
+
+    // sync_requests 폴링 — 웹에서 재스캔 요청 시 전체 폴더 재스캔
+    async function pollSyncRequests() {
+        try {
+            const { data: requests } = await supabase
+                .from('sync_requests')
+                .select('id, center, requested_at')
+                .eq('status', 'pending')
+                .order('requested_at', { ascending: true })
+                .limit(1);
+
+            if (requests && requests.length > 0) {
+                const req = requests[0];
+                console.log(`\n========== [RESCAN REQUESTED] center: ${req.center} ==========`);
+
+                // 상태를 processing으로 변경
+                await supabase
+                    .from('sync_requests')
+                    .update({ status: 'processing' })
+                    .eq('id', req.id);
+
+                // 캐시 초기화 (모든 파일 재처리 가능하도록)
+                processedFiles.clear();
+
+                // 전체 폴더 재스캔 (additive-only: 기존 자료 삭제 없이 새것만 추가)
+                for (const dirInfo of watchDirs) {
+                    if (req.center === '전체' || req.center === dirInfo.center) {
+                        console.log(`\n--- Rescanning [${dirInfo.center || 'Default'}] ${dirInfo.path} ---`);
+                        if (fs.existsSync(dirInfo.path)) {
+                            const allFiles = getAllFiles(dirInfo.path);
+                            console.log(`Found ${allFiles.length} files. Rescanning...`);
+                            for (const file of allFiles) {
+                                await processFile(file, dirInfo.path, dirInfo.center);
+                            }
+                        } else {
+                            console.log(`[WARN] Folder not found: ${dirInfo.path}`);
+                        }
+                    }
+                }
+
+                // 완료 처리
+                await supabase
+                    .from('sync_requests')
+                    .update({
+                        status: 'completed',
+                        completed_at: new Date().toISOString()
+                    })
+                    .eq('id', req.id);
+
+                console.log(`========== [RESCAN COMPLETE] ==========\n`);
+            }
+        } catch (e) {
+            console.error('[POLL ERROR]', e.message);
+        }
+    }
+
+    // 30초마다 sync_requests 폴링
+    setInterval(pollSyncRequests, 30 * 1000);
+    console.log("Polling sync_requests every 30s for rescan triggers...\n");
 }
 
 main();

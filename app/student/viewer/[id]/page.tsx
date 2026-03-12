@@ -215,12 +215,19 @@ export default function ViewerPage() {
   const [videoWidth, setVideoWidth] = useState(400)
   const [isVideoDragging, setIsVideoDragging] = useState(false)
 
+  const [isTablet, setIsTablet] = useState(false)
+
   useEffect(() => {
     const checkMobile = () => {
       const mobile = window.innerWidth <= 768
+      // 터치 디바이스이면서 1366px 이하이면 태블릿 (아이패드 프로 가로모드 포함)
+      const tablet = !mobile && window.innerWidth <= 1366 && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
       setIsMobile(mobile)
+      setIsTablet(tablet)
       // 모바일이면 스크롤 모드 유지, 데스크탑이면 flip도 가능
       if (mobile) setViewMode('scroll')
+      // 태블릿도 스크롤 모드 기본
+      if (tablet) setViewMode('scroll')
     }
     checkMobile()
     window.addEventListener('resize', checkMobile)
@@ -446,7 +453,7 @@ export default function ViewerPage() {
               </Button>
 
               {/* 보기 모드 전환 (학생 / 비교 / 선생님) - 데스크탑 헤더용 */}
-              {isSplitView && !isMobile && (
+              {isSplitView && !isMobile && !isTablet && (
                 <div className="flex bg-black/40 p-0.5 rounded-lg border border-white/10 mx-1">
                   <Button
                     variant="ghost"
@@ -528,8 +535,8 @@ export default function ViewerPage() {
         </div>
       </header>
 
-      {/* 모바일 전용 판서 전환 탭 바 */}
-      {isMobile && isSplitView && (
+      {/* 모바일/태블릿 판서 전환 탭 바 */}
+      {(isMobile || isTablet) && isSplitView && (
         <div className="relative bg-[#1a1a1f]/95 backdrop-blur-xl z-40 border-b border-white/5">
           <div className="flex">
             <button
@@ -887,14 +894,25 @@ export default function ViewerPage() {
                       style={{ top: '-1px', left: '-1px', width: 'calc(100% + 2px)', height: 'calc(100% + 2px)' }}
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                       allowFullScreen
+                      referrerPolicy="no-referrer"
+                      sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
                     />
-                    {/* Click Shields to prevent YouTube link escape */}
+                    {/* Top shield: blocks YouTube title + logo (shows on hover) */}
                     <div
-                      className="absolute top-0 left-0 w-full h-[52px] z-10 cursor-default"
+                      className="absolute top-0 left-0 w-full z-10 cursor-default"
+                      style={{ height: '60px' }}
                       onClick={(e) => e.preventDefault()}
                     />
+                    {/* Bottom-right shield: blocks YouTube logo watermark */}
                     <div
-                      className="absolute bottom-8 right-0 w-[140px] h-[52px] z-10 cursor-default"
+                      className="absolute bottom-0 right-0 z-10 cursor-default"
+                      style={{ width: '160px', height: '60px' }}
+                      onClick={(e) => e.preventDefault()}
+                    />
+                    {/* Bottom-left shield: blocks channel info area */}
+                    <div
+                      className="absolute bottom-0 left-0 z-10 cursor-default"
+                      style={{ width: 'calc(100% - 160px)', height: '28px' }}
                       onClick={(e) => e.preventDefault()}
                     />
                   </div>

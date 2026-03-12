@@ -110,7 +110,12 @@ export default function BatchStudentPage() {
                 }
             }
 
-            if (extractedName && extractedName.length > 1) {
+            // 이름 유효성 검사: 한글 2~4자 이름만 허용 (판서, 교재 파일명 등 제외)
+            const isValidKoreanName = extractedName && /^[가-힣]{2,4}$/.test(extractedName)
+            // 파일명에 교재/판서 관련 키워드가 포함되면 제외
+            const isFileMaterial = /판서|교재|바이블|유형|개념|차시|정답|해설|시험|모의고사/.test(filename)
+
+            if (isValidKoreanName && !isFileMaterial) {
                 if (!potentialStudents.has(extractedName)) {
                     potentialStudents.set(extractedName, {
                         file,
@@ -149,8 +154,9 @@ export default function BatchStudentPage() {
 
         setLoading(true)
 
-        // 1. Fetch existing students to check for duplicates
+        // 1. Fetch existing students and teachers to check for duplicates/conflicts
         let existingNames = new Set<string>();
+        let teacherNames = new Set<string>();
         try {
             const { data: existingStudents } = await supabase
                 .from('profiles')
@@ -160,8 +166,17 @@ export default function BatchStudentPage() {
             if (existingStudents) {
                 existingStudents.forEach(s => existingNames.add(s.full_name))
             }
+
+            // 선생님 목록 조회 - 선생님 이름은 학생으로 등록하지 않음
+            const { data: teachers } = await supabase
+                .from('teachers')
+                .select('name')
+
+            if (teachers) {
+                teachers.forEach(t => teacherNames.add(t.name))
+            }
         } catch (err) {
-            console.error("Failed to fetch existing students", err)
+            console.error("Failed to fetch existing data", err)
         }
 
         const newFiles = [...files]
@@ -171,11 +186,17 @@ export default function BatchStudentPage() {
 
             const studentName = newFiles[i].name.trim()
 
-            // 2. Client-side Duplicate Check
+            // 2. Client-side Duplicate & Teacher Check
+            if (teacherNames.has(studentName)) {
+                newFiles[i].status = 'error'
+                newFiles[i].message = '선생님으로 등록된 이름입니다. (건너뜀)'
+                setFiles([...newFiles])
+                continue;
+            }
             if (existingNames.has(studentName)) {
-                newFiles[i].status = 'error' // Or specific status like 'skipped'
+                newFiles[i].status = 'error'
                 newFiles[i].message = '이미 등록된 학생입니다.'
-                setFiles([...newFiles]) // Update UI immediately
+                setFiles([...newFiles])
                 continue;
             }
 

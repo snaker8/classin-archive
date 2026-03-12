@@ -1,8 +1,12 @@
 {
   "watchDirs": [
     {
-      "path": "D:\\OneDrive\\동래 의대관 클래스인 강의실",
-      "center": "동래"
+      "path": "C:\\Users\\임세현\\OneDrive\\센터별 강의실\\동래 의대관 클래스인 강의실",
+      "center": "동래센터"
+    },
+    {
+      "path": "C:\\Users\\임세현\\OneDrive\\센터별 강의실\\동부산 강의실",
+      "center": "동부산센터"
     }
   ]
 }

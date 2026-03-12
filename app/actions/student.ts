@@ -227,6 +227,7 @@ export async function getStudents() {
                 )
             `)
             .eq('role', 'student')
+            .eq('status', 'active')
 
         // If not super_manager/전체-admin, force filter by their center
         if (requesterProfile.role !== 'super_manager' && !(requesterProfile.role === 'admin' && requesterProfile.center === '전체')) {
@@ -365,6 +366,7 @@ export async function getParentChildren() {
             .select('id, full_name, grade, school, center, hall')
             .eq('parent_phone', parentPhone)
             .eq('role', 'student')
+            .eq('status', 'active')
             .order('full_name')
 
         if (error) throw error

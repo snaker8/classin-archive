@@ -20,6 +20,7 @@ export async function getDashboardData(centerParam?: string, hallParam?: string)
             .from('profiles')
             .select('*')
             .eq('role', 'student')
+            .eq('status', 'active')
 
         if (center && center !== '전체') {
             studentQuery = studentQuery.eq('center', center)
@@ -61,6 +62,7 @@ export async function getDashboardData(centerParam?: string, hallParam?: string)
             .from('profiles')
             .select('*', { count: 'exact', head: true })
             .eq('role', 'student')
+            .eq('status', 'active')
 
         if (center && center !== '전체') {
             studentCountQuery = studentCountQuery.eq('center', center)

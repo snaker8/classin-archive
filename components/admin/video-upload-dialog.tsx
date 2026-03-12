@@ -20,9 +20,8 @@ import { Label } from '@/components/ui/label'
 import { Calendar } from '@/components/ui/calendar'
 import { Upload, Loader2, Video, CheckCircle2, AlertCircle, X, FileVideo, Calendar as CalendarIcon } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
-import { supabase } from '@/lib/supabase/client'
 import { getAllClasses } from '@/app/actions/class'
-import { getSignedUploadUrl, registerManualVideoBatch } from '@/app/actions/video-archive'
+import { registerManualVideoBatch } from '@/app/actions/video-archive'
 import { useToast } from '@/components/ui/use-toast'
 import { cn, formatDate } from '@/lib/utils'
 import { format } from 'date-fns'
@@ -143,30 +142,28 @@ export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUpload
 
             for (let i = 0; i < files.length; i++) {
                 const file = files[i]
-                const safeName = sanitizeFilename(file.name)
-                const storagePath = `manual/${selectedClassId}/${batchId}/${safeName}`
 
-                // 1. Get signed upload URL from server
-                const urlRes = await getSignedUploadUrl(storagePath)
-                if (urlRes.error || !urlRes.token) {
-                    throw new Error(`업로드 URL 생성 실패: ${urlRes.error}`)
+                // 로컬 서버로 업로드 (Supabase 경유 없이 직접 저장)
+                const formData = new FormData()
+                formData.append('file', file)
+                formData.append('batchId', batchId)
+                formData.append('classId', selectedClassId)
+
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData,
+                })
+
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}))
+                    throw new Error(`파일 업로드 실패 (${file.name}): ${errData.error || res.statusText}`)
                 }
 
-                // 2. Upload directly to Supabase Storage using signed URL
-                const { error: uploadError } = await supabase.storage
-                    .from('raw-videos')
-                    .uploadToSignedUrl(storagePath, urlRes.token, file, {
-                        contentType: file.type || 'video/mp4',
-                        upsert: true,
-                    })
-
-                if (uploadError) {
-                    throw new Error(`파일 업로드 실패 (${file.name}): ${uploadError.message}`)
-                }
+                const result = await res.json()
 
                 totalUploaded += file.size
                 setProgress(Math.round((totalUploaded / totalSize) * 100))
-                uploadedFiles.push({ path: storagePath, name: file.name })
+                uploadedFiles.push({ path: result.localPath, name: file.name })
             }
 
             setUploadStep('processing')
@@ -353,7 +350,7 @@ export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUpload
                         <div className="space-y-2 p-4 bg-indigo-50 rounded-lg border border-indigo-100">
                             <div className="flex items-center justify-between text-sm mb-1">
                                 <span className="text-indigo-700 font-medium flex items-center gap-2">
-                                    <Loader2 className="h-4 w-4 animate-spin" /> Supabase Storage로 직접 업로드 중...
+                                    <Loader2 className="h-4 w-4 animate-spin" /> 서버로 업로드 중...
                                 </span>
                                 <span className="text-indigo-600 font-bold">{progress}%</span>
                             </div>
