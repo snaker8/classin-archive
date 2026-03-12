@@ -20,8 +20,9 @@ import { Label } from '@/components/ui/label'
 import { Calendar } from '@/components/ui/calendar'
 import { Upload, Loader2, Video, CheckCircle2, AlertCircle, X, FileVideo, Calendar as CalendarIcon } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
+import { supabase } from '@/lib/supabase/client'
 import { getAllClasses } from '@/app/actions/class'
-import { registerManualVideoBatch } from '@/app/actions/video-archive'
+import { getSignedUploadUrl, registerManualVideoBatch } from '@/app/actions/video-archive'
 import { useToast } from '@/components/ui/use-toast'
 import { cn, formatDate } from '@/lib/utils'
 import { format } from 'date-fns'
@@ -33,7 +34,12 @@ interface VideoUploadDialogProps {
     onSuccess: () => void
 }
 
-const CHUNK_SIZE = 5 * 1024 * 1024 // 5MB per chunk
+// Sanitize filename for Supabase Storage
+function sanitizeFilename(name: string): string {
+    return name
+        .replace(/[^\w.\-]/g, '_')
+        .replace(/_+/g, '_')
+}
 
 export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUploadDialogProps) {
     const { toast } = useToast()
@@ -137,41 +143,30 @@ export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUpload
 
             for (let i = 0; i < files.length; i++) {
                 const file = files[i]
-                const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+                const safeName = sanitizeFilename(file.name)
+                const storagePath = `manual/${selectedClassId}/${batchId}/${safeName}`
 
-                for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-                    const start = chunkIdx * CHUNK_SIZE
-                    const end = Math.min(start + CHUNK_SIZE, file.size)
-                    const chunk = file.slice(start, end)
+                // 1. 서버에서 Signed URL 발급 (작은 요청)
+                const urlRes = await getSignedUploadUrl(storagePath)
+                if (urlRes.error || !urlRes.token) {
+                    throw new Error(`업로드 URL 생성 실패: ${urlRes.error}`)
+                }
 
-                    const formData = new FormData()
-                    formData.append('chunk', chunk)
-                    formData.append('chunkIndex', String(chunkIdx))
-                    formData.append('totalChunks', String(totalChunks))
-                    formData.append('chunkSize', String(CHUNK_SIZE))
-                    formData.append('filename', file.name)
-                    formData.append('batchId', batchId)
-                    formData.append('classId', selectedClassId)
-                    formData.append('localOnly', 'true')
-
-                    const res = await fetch('/api/upload/chunk', {
-                        method: 'POST',
-                        body: formData,
+                // 2. 브라우저에서 Supabase Storage로 직접 업로드 (Cloud Function 경유 없음)
+                const { error: uploadError } = await supabase.storage
+                    .from('raw-videos')
+                    .uploadToSignedUrl(storagePath, urlRes.token, file, {
+                        contentType: file.type || 'video/mp4',
+                        upsert: true,
                     })
 
-                    if (!res.ok) {
-                        const errData = await res.json().catch(() => ({}))
-                        throw new Error(`파일 업로드 실패 (${file.name}): ${errData.error || res.statusText}`)
-                    }
-
-                    const result = await res.json()
-                    totalUploaded += (end - start)
-                    setProgress(Math.round((totalUploaded / totalSize) * 100))
-
-                    if (result.isComplete && result.localPath) {
-                        uploadedFiles.push({ path: result.localPath, name: file.name })
-                    }
+                if (uploadError) {
+                    throw new Error(`파일 업로드 실패 (${file.name}): ${uploadError.message}`)
                 }
+
+                totalUploaded += file.size
+                setProgress(Math.round((totalUploaded / totalSize) * 100))
+                uploadedFiles.push({ path: storagePath, name: file.name })
             }
 
             setUploadStep('processing')
@@ -358,7 +353,7 @@ export function VideoUploadDialog({ open, onOpenChange, onSuccess }: VideoUpload
                         <div className="space-y-2 p-4 bg-indigo-50 rounded-lg border border-indigo-100">
                             <div className="flex items-center justify-between text-sm mb-1">
                                 <span className="text-indigo-700 font-medium flex items-center gap-2">
-                                    <Loader2 className="h-4 w-4 animate-spin" /> 서버로 업로드 중... (5MB 단위 청크 전송)
+                                    <Loader2 className="h-4 w-4 animate-spin" /> Supabase Storage로 직접 업로드 중...
                                 </span>
                                 <span className="text-indigo-600 font-bold">{progress}%</span>
                             </div>

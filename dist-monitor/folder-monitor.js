@@ -162,7 +162,7 @@ async function processFile(filePath, rootDir, centerName) {
     }
 }
 
-// Process Video (Shared Class Material)
+// Process Video → video_archive 등록 → main.py가 무음제거 + YouTube 업로드 처리
 async function processVideo(filePath, rootDir, fileName) {
     const { room, groupCode, subType, classDate, relativePath, parts } = parsePath(filePath, rootDir);
     if (!groupCode || !classDate) return;
@@ -170,72 +170,67 @@ async function processVideo(filePath, rootDir, fileName) {
     console.log(`[VIDEO DETECTED] ${groupCode}/${subType || ''} | Date: ${classDate} | ${fileName}`);
 
     try {
-        const safeFileName = `${Date.now()}_${safeStorageKey(fileName)}`;
-        const storagePath = `_shared/${safeStorageKey(groupCode)}/${classDate}/${safeFileName}`;
-        const fileContent = fs.readFileSync(filePath);
-
-        let contentType = 'video/mp4';
-        if (fileName.toLowerCase().endsWith('.mov')) contentType = 'video/quicktime';
-        else if (fileName.toLowerCase().endsWith('.webm')) contentType = 'video/webm';
-
-        console.log(`   -> Uploading video to shared storage...`);
-        const { error: uploadError } = await supabase.storage
-            .from('blackboard-images')
-            .upload(storagePath, fileContent, { contentType, upsert: false });
-
-        if (uploadError) throw uploadError;
-
-        const { data: publicUrlData } = supabase.storage
-            .from('blackboard-images')
-            .getPublicUrl(storagePath);
-
-        const contentUrl = publicUrlData.publicUrl;
-
-        // 그룹 기반으로 정확한 수업 매칭 (그룹 자동생성 안 함)
+        // 1. 그룹 매칭으로 수업 제목 결정
         const matchedGroup = await findOrCreateGroup(groupCode, subType, null, false);
         if (!matchedGroup) {
-            console.log(`   -> [SKIP] 매칭 그룹 없음. 비디오 업로드만 완료, 연결 안 함.`);
+            console.log(`   -> [SKIP] 매칭 그룹 없음. 동영상 처리 건너뜀.`);
             addToCache(filePath);
             return;
         }
         const targetTitle = matchedGroup.name;
 
+        // 2. 해당 날짜/반의 수업 찾기 (첫 번째 학생의 class_id 사용)
         let { data: classes } = await supabase
             .from('classes')
-            .select('id, title, student:profiles!classes_student_id_fkey(full_name)')
+            .select('id')
             .eq('class_date', classDate)
-            .eq('title', targetTitle);
+            .eq('title', targetTitle)
+            .limit(1);
 
         if (!classes || classes.length === 0) {
-            console.log(`   -> [INFO] '${targetTitle}' 수업이 아직 없음. 비디오 업로드만 완료.`);
+            console.log(`   -> [INFO] '${targetTitle}' ${classDate} 수업이 아직 없음. 동영상 대기.`);
             addToCache(filePath);
             return;
         }
 
-        console.log(`   -> Linking video to ${classes.length} students (title='${targetTitle}')...`);
+        const classId = classes[0].id;
 
-        // 3. Link to each class
-        for (const cls of classes) {
-            // Check duplicate
-            const { count } = await supabase
-                .from('materials')
-                .select('*', { count: 'exact', head: true })
-                .eq('class_id', cls.id)
-                .eq('title', fileName);
+        // 3. 중복 체크: 같은 파일명이 이미 video_archive에 있는지
+        const { count: existingCount } = await supabase
+            .from('video_archive')
+            .select('*', { count: 'exact', head: true })
+            .eq('class_id', classId)
+            .eq('title', fileName);
 
-            if (count > 0) continue;
-
-            await supabase.from('materials').insert({
-                class_id: cls.id,
-                type: 'video_link', // Use video_link type for now
-                title: fileName,
-                content_url: contentUrl,
-                order_index: 100 // Videos at end
-            });
-            console.log(`      + Linked to ${cls.student.full_name}`);
+        if (existingCount > 0) {
+            console.log(`   -> [SKIP] 이미 등록된 동영상: ${fileName}`);
+            addToCache(filePath);
+            return;
         }
 
-        console.log(`   -> [SUCCESS] Video processed.`);
+        // 4. video_archive에 local: 경로로 등록 → main.py가 자동 처리
+        const localPath = `local:${filePath}`;
+        const batchId = require('crypto').randomUUID();
+
+        const { error: insertError } = await supabase
+            .from('video_archive')
+            .insert({
+                class_id: classId,
+                title: fileName,
+                file_path: localPath,
+                batch_id: batchId,
+                part_number: 1,
+                total_parts: 1,
+                status: 'processing',
+                device_id: process.env.DEVICE_ID || 'folder-monitor',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            });
+
+        if (insertError) throw insertError;
+
+        console.log(`   -> [SUCCESS] video_archive 등록 완료. main.py가 무음제거 + YouTube 업로드 처리 예정.`);
+        console.log(`      class: ${targetTitle} | date: ${classDate} | path: ${localPath}`);
         addToCache(filePath);
 
     } catch (err) {
