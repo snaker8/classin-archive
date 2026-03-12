@@ -79,72 +79,75 @@ export async function POST(req: NextRequest) {
         }
 
         const isComplete = chunkIndex === totalChunks - 1;
+        const localOnly = formData.get('localOnly') === 'true';
         let finalPath = filePath;
-        // Sanitize filename for Supabase Storage (no Korean, spaces, brackets)
-        const safeFilename = filename
-            .replace(/[^\w.\-]/g, '_')
-            .replace(/_+/g, '_');
-        let storagePath = `manual/${classId}/${batchId}/${safeFilename}`;
 
         if (isComplete) {
             const fileSize = fs.statSync(filePath).size;
             const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
-            console.log(`[Chunk Upload] Completed: ${filename} (${fileSizeMB}MB) for batch ${batchId}. Uploading to Supabase...`);
+            console.log(`[Chunk Upload] Completed: ${filename} (${fileSizeMB}MB) for batch ${batchId}.`);
 
-            try {
-                // Use streaming fetch for large files to avoid OOM
-                const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-                const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            if (!localOnly) {
+                // Sanitize filename for Supabase Storage (no Korean, spaces, brackets)
+                const safeFilename = filename
+                    .replace(/[^\w.\-]/g, '_')
+                    .replace(/_+/g, '_');
+                const storagePath = `manual/${classId}/${batchId}/${safeFilename}`;
 
-                if (!supabaseUrl || !serviceKey) {
-                    throw new Error('Missing Supabase environment variables');
-                }
-
-                const fileStream = fs.createReadStream(filePath);
-                const uploadUrl = `${supabaseUrl}/storage/v1/object/raw-videos/${storagePath}`;
-
-                const response = await fetch(uploadUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${serviceKey}`,
-                        'Content-Type': 'video/mp4',
-                        'Content-Length': String(fileSize),
-                        'x-upsert': 'true',
-                    },
-                    body: fileStream as any,
-                    // @ts-ignore - duplex required for streaming body in Node 18+
-                    duplex: 'half',
-                });
-
-                if (!response.ok) {
-                    const errBody = await response.text();
-                    throw new Error(`Storage upload failed (${response.status}): ${errBody}`);
-                }
-
-                console.log(`[Chunk Upload] Successfully uploaded to Supabase: ${storagePath} (${fileSizeMB}MB)`);
-
-                // Cleanup local file after successful upload to storage
-                fs.unlinkSync(filePath);
-                // Also try to remove directory if empty
                 try {
-                    const dir = path.dirname(filePath);
-                    if (fs.readdirSync(dir).length === 0) {
-                        fs.rmdirSync(dir);
-                    }
-                } catch (e) { }
+                    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+                    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-                finalPath = storagePath;
-            } catch (err: any) {
-                console.error('[Chunk Upload] Supabase upload failed:', err);
-                return NextResponse.json({ error: 'Failed to upload finalized file to cloud storage: ' + err.message }, { status: 500 });
+                    if (!supabaseUrl || !serviceKey) {
+                        throw new Error('Missing Supabase environment variables');
+                    }
+
+                    const fileStream = fs.createReadStream(filePath);
+                    const uploadUrl = `${supabaseUrl}/storage/v1/object/raw-videos/${storagePath}`;
+
+                    const response = await fetch(uploadUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${serviceKey}`,
+                            'Content-Type': 'video/mp4',
+                            'Content-Length': String(fileSize),
+                            'x-upsert': 'true',
+                        },
+                        body: fileStream as any,
+                        // @ts-ignore - duplex required for streaming body in Node 18+
+                        duplex: 'half',
+                    });
+
+                    if (!response.ok) {
+                        const errBody = await response.text();
+                        throw new Error(`Storage upload failed (${response.status}): ${errBody}`);
+                    }
+
+                    console.log(`[Chunk Upload] Uploaded to Supabase: ${storagePath} (${fileSizeMB}MB)`);
+                    fs.unlinkSync(filePath);
+                    try {
+                        const dir = path.dirname(filePath);
+                        if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+                    } catch (e) { }
+
+                    finalPath = storagePath;
+                } catch (err: any) {
+                    console.error('[Chunk Upload] Supabase upload failed:', err);
+                    return NextResponse.json({ error: 'Cloud storage 업로드 실패: ' + err.message }, { status: 500 });
+                }
+            } else {
+                console.log(`[Chunk Upload] Local-only mode. File saved: ${filePath} (${fileSizeMB}MB)`);
+                finalPath = `local:${filePath}`;
             }
         }
 
         return NextResponse.json({
             success: true,
             isComplete,
+            chunkIndex,
+            totalChunks,
             path: finalPath,
-            localPath: isComplete ? finalPath : `local:${filePath}`
+            localPath: isComplete ? finalPath : undefined
         });
 
     } catch (error: any) {
