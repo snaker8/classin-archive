@@ -5,13 +5,16 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ArrowLeft, Loader2, CheckCircle, AlertCircle, Upload, FileText, X } from 'lucide-react'
+import { ArrowLeft, Loader2, CheckCircle, AlertCircle, Upload, FileText, X, Table } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
+import * as XLSX from 'xlsx'
 
 interface FileItem {
     file: File
     name: string
+    phone?: string
     grade?: string // Class/Grade info
+    center?: string
     status: 'pending' | 'success' | 'error'
     message?: string
 }
@@ -78,41 +81,117 @@ export default function BatchStudentPage() {
         return files
     }
 
-    const onDrop = useCallback((acceptedFiles: File[]) => {
+    // 엑셀 파일 파싱
+    const parseExcelFile = useCallback(async (file: File): Promise<FileItem[]> => {
+        return new Promise((resolve) => {
+            const reader = new FileReader()
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target?.result as ArrayBuffer)
+                    const workbook = XLSX.read(data, { type: 'array' })
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+                    const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+
+                    if (rows.length === 0) { resolve([]); return }
+
+                    // 컬럼 자동 감지: 이름, 전화번호, 센터, 반
+                    const headers = Object.keys(rows[0])
+                    const findCol = (keywords: string[]) =>
+                        headers.find(h => keywords.some(k => h.toLowerCase().includes(k))) || ''
+
+                    const nameCol = findCol(['이름', '성명', 'name', '학생'])
+                    const phoneCol = findCol(['전화', '번호', 'phone', '연락처', '핸드폰', '휴대폰'])
+                    const centerCol = findCol(['센터', 'center', '지점'])
+                    const gradeCol = findCol(['반', 'class', 'grade', '학년', '그룹', 'group'])
+
+                    if (!nameCol) {
+                        // 첫 번째 컬럼을 이름으로 사용
+                        const firstCol = headers[0]
+                        const items: FileItem[] = rows
+                            .map(row => {
+                                const name = String(row[firstCol] || '').trim()
+                                if (!name || !/^[가-힣]{2,4}$/.test(name)) return null
+                                return {
+                                    file,
+                                    name,
+                                    phone: phoneCol ? String(row[phoneCol] || '').replace(/-/g, '').trim() : undefined,
+                                    center: centerCol ? String(row[centerCol] || '').trim() : undefined,
+                                    grade: gradeCol ? String(row[gradeCol] || '').trim() : undefined,
+                                    status: 'pending' as const,
+                                }
+                            })
+                            .filter(Boolean) as FileItem[]
+                        resolve(items)
+                        return
+                    }
+
+                    const items: FileItem[] = rows
+                        .map(row => {
+                            const name = String(row[nameCol] || '').trim()
+                            if (!name || !/^[가-힣]{2,4}$/.test(name)) return null
+                            return {
+                                file,
+                                name,
+                                phone: phoneCol ? String(row[phoneCol] || '').replace(/-/g, '').trim() : undefined,
+                                center: centerCol ? String(row[centerCol] || '').trim() : undefined,
+                                grade: gradeCol ? String(row[gradeCol] || '').trim() : undefined,
+                                status: 'pending' as const,
+                            }
+                        })
+                        .filter(Boolean) as FileItem[]
+
+                    resolve(items)
+                } catch (err) {
+                    console.error('Excel parse error:', err)
+                    resolve([])
+                }
+            }
+            reader.readAsArrayBuffer(file)
+        })
+    }, [])
+
+    const onDrop = useCallback(async (acceptedFiles: File[]) => {
         const potentialStudents = new Map<string, FileItem>()
 
-        acceptedFiles.forEach(file => {
+        // 1. 엑셀 파일 처리
+        const excelFiles = acceptedFiles.filter(f =>
+            f.name.endsWith('.xlsx') || f.name.endsWith('.xls') || f.name.endsWith('.csv')
+        )
+        for (const excelFile of excelFiles) {
+            const items = await parseExcelFile(excelFile)
+            items.forEach(item => {
+                if (!potentialStudents.has(item.name)) {
+                    potentialStudents.set(item.name, item)
+                }
+            })
+        }
+
+        // 2. 폴더/파일 구조에서 이름 추출 (기존 로직)
+        const nonExcelFiles = acceptedFiles.filter(f =>
+            !f.name.endsWith('.xlsx') && !f.name.endsWith('.xls') && !f.name.endsWith('.csv')
+        )
+        nonExcelFiles.forEach(file => {
             const pathParts = file.webkitRelativePath.split('/')
             let extractedName = ''
             let extractedGrade = ''
 
-            // Logic to find Student Name and Class Name (Grade)
-
-            // 1. Try Filename first (most specific)
             const filename = pathParts[pathParts.length - 1]
             const nameFromFilename = filename.split(/[_.\s-]/)[0]
 
             if (nameFromFilename && nameFromFilename.length > 1 && !nameFromFilename.match(/^\d+$/)) {
                 extractedName = nameFromFilename
-                // Grade is the immediate parent folder
                 if (pathParts.length > 1) {
                     extractedGrade = pathParts[pathParts.length - 2]
                 }
-            }
-            // 2. If filename didn't yield a name (or it was just numbers/generic), try Folder Name
-            else if (pathParts.length > 1) {
-                // Assume the folder naming the file is the Student
+            } else if (pathParts.length > 1) {
                 const folderName = pathParts[pathParts.length - 2]
                 extractedName = folderName
-                // Grade is the parent of that folder (Grandparent of file)
                 if (pathParts.length > 2) {
                     extractedGrade = pathParts[pathParts.length - 3]
                 }
             }
 
-            // 이름 유효성 검사: 한글 2~4자 이름만 허용 (판서, 교재 파일명 등 제외)
             const isValidKoreanName = extractedName && /^[가-힣]{2,4}$/.test(extractedName)
-            // 파일명에 교재/판서 관련 키워드가 포함되면 제외
             const isFileMaterial = /판서|교재|바이블|유형|개념|차시|정답|해설|시험|모의고사/.test(filename)
 
             if (isValidKoreanName && !isFileMaterial) {
@@ -128,143 +207,71 @@ export default function BatchStudentPage() {
         })
 
         setFiles(prev => {
-            // Deduplicate against existing list
             const newItems = Array.from(potentialStudents.values()).filter(
                 newItem => !prev.some(existing => existing.name === newItem.name)
             )
             return [...prev, ...newItems]
         })
-    }, [])
+    }, [parseExcelFile])
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
         getFilesFromEvent: (event) => getFilesFromEvent(event).then(f => f),
-        // Accept anything since we just want names
+        // Accept excel files and any other files (for folder-based detection)
     })
 
     const removeFile = (index: number) => {
         setFiles(prev => prev.filter((_, i) => i !== index))
     }
 
-    // Helper for delay
-    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
     const handleBatchRegister = async () => {
         if (files.length === 0) return
 
         setLoading(true)
-
-        // 1. Fetch existing students and teachers to check for duplicates/conflicts
-        let existingNames = new Set<string>();
-        let teacherNames = new Set<string>();
-        try {
-            const { data: existingStudents } = await supabase
-                .from('profiles')
-                .select('full_name')
-                .eq('role', 'student')
-
-            if (existingStudents) {
-                existingStudents.forEach(s => existingNames.add(s.full_name))
-            }
-
-            // 선생님 목록 조회 - 선생님 이름은 학생으로 등록하지 않음
-            const { data: teachers } = await supabase
-                .from('teachers')
-                .select('name')
-
-            if (teachers) {
-                teachers.forEach(t => teacherNames.add(t.name))
-            }
-        } catch (err) {
-            console.error("Failed to fetch existing data", err)
-        }
-
         const newFiles = [...files]
 
-        for (let i = 0; i < newFiles.length; i++) {
-            if (newFiles[i].status === 'success') continue;
+        try {
+            // 서버 API로 일괄 등록 (Admin API 사용 - 세션 영향 없음)
+            const { data: { session } } = await supabase.auth.getSession()
+            const pendingStudents = newFiles
+                .filter(f => f.status === 'pending')
+                .map(f => ({
+                    name: f.name.trim(),
+                    phone: f.phone?.replace(/-/g, ''),
+                    center: f.center,
+                    grade: f.grade,
+                }))
 
-            const studentName = newFiles[i].name.trim()
+            const response = await fetch('/api/admin/students/batch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session?.access_token}`,
+                },
+                body: JSON.stringify({ students: pendingStudents }),
+            })
 
-            // 2. Client-side Duplicate & Teacher Check
-            if (teacherNames.has(studentName)) {
-                newFiles[i].status = 'error'
-                newFiles[i].message = '선생님으로 등록된 이름입니다. (건너뜀)'
-                setFiles([...newFiles])
-                continue;
+            const { results, error } = await response.json()
+
+            if (error) {
+                alert(`오류: ${error}`)
+                setLoading(false)
+                return
             }
-            if (existingNames.has(studentName)) {
-                newFiles[i].status = 'error'
-                newFiles[i].message = '이미 등록된 학생입니다.'
-                setFiles([...newFiles])
-                continue;
-            }
 
-            // 3. Rate Limit Handling with Retries
-            let retries = 0;
-            const maxRetries = 3;
-            let success = false;
-
-            while (!success && retries < maxRetries) {
-                try {
-                    // Dynamic delay: Increase delay as we progress to cool down
-                    const baseDelay = 2500; // 2.5 seconds base
-                    const currentDelay = baseDelay + (retries * 2000);
-
-                    if (i > 0 || retries > 0) await delay(currentDelay)
-
-                    const uniqueId = Math.random().toString(36).substring(2, 8)
-                    const email = `student_${Date.now()}_${uniqueId}@classin.com`
-                    const password = '123456'
-
-                    const { data: authData, error: authError } = await supabase.auth.signUp({
-                        email,
-                        password,
-                        options: {
-                            data: {
-                                full_name: studentName,
-                                grade: newFiles[i].grade
-                            }
-                        },
-                    })
-
-                    if (authError) throw authError
-
-                    if (authData.user) {
-                        newFiles[i].status = 'success'
-                        newFiles[i].message = `가입 완료 (${newFiles[i].grade ? newFiles[i].grade : '반 정보 없음'})`
-                        success = true;
-                        // Add to existing names so we don't try to add them again if they appear twice in the list
-                        existingNames.add(studentName);
-                    } else {
-                        if (authData.user === null) throw new Error("User creation returned null")
-                        newFiles[i].status = 'success'
-                        success = true;
-                    }
-
-                } catch (error: any) {
-                    console.error(`Attempt ${retries + 1} failed for ${studentName}:`, error.message)
-
-                    if (error.message.includes('Rate limit') || error.status === 429) {
-                        retries++;
-                        newFiles[i].message = `속도 제한 대기 중... (${retries}/${maxRetries})`
-                        setFiles([...newFiles])
-                        await delay(5000 * retries); // Wait 5s, 10s, 15s...
-                    } else {
-                        // Non-retryable error
-                        newFiles[i].status = 'error'
-                        newFiles[i].message = error.message
-                        break;
-                    }
+            // 결과를 파일 목록에 반영
+            const resultMap = new Map<string, { name: string; status: 'success' | 'error'; message: string }>(results.map((r: any) => [r.name, r]))
+            for (let i = 0; i < newFiles.length; i++) {
+                const result = resultMap.get(newFiles[i].name.trim())
+                if (result) {
+                    newFiles[i].status = result.status
+                    newFiles[i].message = result.message
                 }
             }
-
-            if (!success && newFiles[i].status !== 'error') {
-                newFiles[i].status = 'error'
-                newFiles[i].message = '가입 실패 (시간 초과)'
-            }
-
             setFiles([...newFiles])
+        } catch (error: any) {
+            console.error('Batch register error:', error)
+            alert(`일괄 등록 중 오류 발생: ${error.message}`)
         }
 
         setLoading(false)
@@ -292,8 +299,11 @@ export default function BatchStudentPage() {
                     <CardHeader>
                         <CardTitle>파일/폴더 업로드</CardTitle>
                         <CardDescription>
+                            <strong>엑셀 파일</strong>(.xlsx/.xls/.csv)을 드래그하거나,<br />
                             <code>[반이름] / [학생이름]</code> 구조의 폴더를 통째로 드래그하세요.<br />
-                            (예: <code>중3A반/홍길동/..</code> → 홍길동(중3A반) 등록)
+                            <span className="text-xs text-muted-foreground mt-1 block">
+                                엑셀 컬럼: 이름(필수), 전화번호, 센터, 반 — 자동 인식
+                            </span>
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="flex-1 flex flex-col">
@@ -305,10 +315,10 @@ export default function BatchStudentPage() {
                             <input {...getInputProps()} />
                             <Upload className={`h-12 w-12 mb-4 ${isDragActive ? 'text-primary' : 'text-gray-400'}`} />
                             <p className="text-lg font-medium text-center mb-2">
-                                {isDragActive ? "여기에 놓으세요!" : "폴더를 통째로 여기에 드래그하세요"}
+                                {isDragActive ? "여기에 놓으세요!" : "엑셀 파일 또는 폴더를 드래그하세요"}
                             </p>
                             <p className="text-sm text-muted-foreground">
-                                하위 폴더까지 모두 검색하여 학생 이름을 찾습니다
+                                .xlsx, .xls, .csv 파일 또는 학생 폴더를 지원합니다
                             </p>
                         </div>
                     </CardContent>
@@ -364,7 +374,7 @@ export default function BatchStudentPage() {
                                                     )}
                                                 </div>
                                                 <p className="text-xs text-muted-foreground truncate">
-                                                    {item.status === 'success' ? item.message : (item.grade ? `${item.grade} 폴더에서 발견` : item.file.name)}
+                                                    {item.status === 'success' ? item.message : [item.phone, item.center, item.grade].filter(Boolean).join(' · ') || item.file.name}
                                                 </p>
                                                 {item.status === 'error' && (
                                                     <p className="text-xs text-red-600 truncate">{item.message}</p>
