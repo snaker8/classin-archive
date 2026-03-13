@@ -250,7 +250,7 @@ export default function SettingsPage() {
             })
             const data = await res.json()
             if (data.success) {
-                if (data.pending) {
+                if (data.pending && !data.requestId) {
                     setSyncResult('이미 동기화 요청이 대기 중입니다.')
                     setIsSyncing(false)
                 } else {

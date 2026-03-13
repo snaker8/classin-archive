@@ -16,7 +16,15 @@ export async function POST(request: Request) {
         const body = await request.json().catch(() => ({}))
         const targetCenter = body.center || '전체'
 
-        // 이미 pending 중인 요청이 있는지 확인
+        // 10분 이상 된 오래된 pending/running 요청 자동 정리
+        const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+        await supabase
+            .from('sync_requests')
+            .update({ status: 'done', completed_at: new Date().toISOString(), log_message: '응답 없음 (자동 만료)' })
+            .in('status', ['pending', 'running'])
+            .lt('requested_at', tenMinAgo)
+
+        // 이미 최근 pending 중인 요청이 있는지 확인
         const { data: existing } = await supabase
             .from('sync_requests')
             .select('id, requested_at')
@@ -27,8 +35,9 @@ export async function POST(request: Request) {
         if (existing && existing.length > 0) {
             return NextResponse.json({
                 success: true,
-                message: '이미 동기화 요청이 대기 중입니다. 로컬 PC가 연결되면 곧 실행됩니다.',
-                pending: true
+                message: '이미 동기화 요청이 대기 중입니다.',
+                pending: true,
+                requestId: existing[0].id
             })
         }
 
