@@ -1071,19 +1071,35 @@ async function scanForSiblingTeacherBoards(classId, folderPath, className, class
 
                 console.log(`   -> Found detected teacher sibling: ${imgFile}. Linking...`);
 
-                // Find uploaded content_url in _shared/teachers
-                // We look for any material with this title that has type 'teacher_blackboard_image'
-                const { data: existingMaterials } = await supabase
-                    .from('materials')
+                // Find uploaded content_url: teacher_board_master에서 같은 날짜로 정확 매칭
+                let contentUrl;
+                const { data: masterBoards } = await supabase
+                    .from('teacher_board_master')
                     .select('content_url')
-                    .eq('title', imgFile)
-                    .eq('type', 'teacher_blackboard_image')
+                    .eq('filename', imgFile)
+                    .eq('class_date', classDate)
                     .limit(1);
 
-                let contentUrl;
-                if (existingMaterials && existingMaterials.length > 0) {
-                    contentUrl = existingMaterials[0].content_url;
-                } else {
+                if (masterBoards && masterBoards.length > 0) {
+                    contentUrl = masterBoards[0].content_url;
+                }
+
+                // master에 없으면 같은 날짜 같은 수업의 다른 학생 class에서 찾기
+                if (!contentUrl) {
+                    const { data: sameDateMaterials } = await supabase
+                        .from('materials')
+                        .select('content_url, class:classes!inner(class_date)')
+                        .eq('title', imgFile)
+                        .eq('type', 'teacher_blackboard_image')
+                        .eq('class.class_date', classDate)
+                        .limit(1);
+
+                    if (sameDateMaterials && sameDateMaterials.length > 0) {
+                        contentUrl = sameDateMaterials[0].content_url;
+                    }
+                }
+
+                if (!contentUrl) {
                     // Trigger upload if not found
                     console.log(`      Teacher board not on server yet. triggering upload...`);
                     await processTeacherImage(path.join(folderPath, imgFile), rootDir, imgFile);
@@ -1311,36 +1327,68 @@ async function pollForSyncRequests(watchDirs, centerMapping) {
 
             try {
                 // Reload metadata before scan
+                await supabase.from('sync_requests')
+                    .update({ log_message: '교사/그룹/학생 정보 로딩 중...' })
+                    .eq('id', req.id);
+
                 await loadTeachers();
                 await loadGroups();
                 await loadStudents();
 
-                // Scan all target dirs
-                let totalProcessed = 0;
+                // Collect all files first to get total count
+                let allFilesToProcess = [];
                 for (const dir of dirsToScan) {
                     console.log(`[REMOTE SYNC] Scanning: ${dir}`);
                     try {
                         const allFiles = getAllFiles(dir);
                         console.log(`[REMOTE SYNC]   Found ${allFiles.length} files.`);
-                        for (const file of allFiles) {
-                            await processFile(file, dir);
-                            totalProcessed++;
-                        }
+                        allFilesToProcess.push(...allFiles.map(f => ({ file: f, dir })));
                     } catch (e) {
                         console.error(`[REMOTE SYNC] Scan failed for ${dir}:`, e.message);
+                    }
+                }
+
+                const totalFiles = allFilesToProcess.length;
+                await supabase.from('sync_requests')
+                    .update({ files_found: totalFiles, files_processed: 0, log_message: `${totalFiles}개 파일 발견, 처리 시작...` })
+                    .eq('id', req.id);
+
+                // Process all files with progress tracking
+                let totalProcessed = 0;
+                let lastUpdateTime = 0;
+                for (const { file, dir } of allFilesToProcess) {
+                    await processFile(file, dir);
+                    totalProcessed++;
+
+                    // Update progress every 2 seconds or on last file
+                    const now = Date.now();
+                    if (now - lastUpdateTime > 2000 || totalProcessed === totalFiles) {
+                        lastUpdateTime = now;
+                        const pct = totalFiles > 0 ? Math.round((totalProcessed / totalFiles) * 100) : 100;
+                        await supabase.from('sync_requests')
+                            .update({
+                                files_processed: totalProcessed,
+                                log_message: `처리 중... ${totalProcessed}/${totalFiles} (${pct}%)`
+                            })
+                            .eq('id', req.id);
                     }
                 }
 
                 console.log(`[REMOTE SYNC] Done. Processed ${totalProcessed} files.`);
 
                 await supabase.from('sync_requests')
-                    .update({ status: 'done', completed_at: new Date().toISOString() })
+                    .update({
+                        status: 'done',
+                        completed_at: new Date().toISOString(),
+                        files_processed: totalProcessed,
+                        log_message: `완료: ${totalProcessed}개 파일 처리됨`
+                    })
                     .eq('id', req.id);
 
             } catch (scanErr) {
                 console.error('[REMOTE SYNC] Scan error:', scanErr.message);
                 await supabase.from('sync_requests')
-                    .update({ status: 'error', completed_at: new Date().toISOString(), error_message: scanErr.message })
+                    .update({ status: 'error', completed_at: new Date().toISOString(), error_message: scanErr.message, log_message: `오류: ${scanErr.message}` })
                     .eq('id', req.id);
             }
         }

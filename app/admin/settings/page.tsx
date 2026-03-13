@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { updateAdminPassword } from '@/app/actions/auth-admin'
 import { useToast } from '@/components/ui/use-toast'
-import { Loader2, RefreshCcw, Trash2, AlertTriangle, CheckCircle2, Plus, FolderOpen } from 'lucide-react'
+import { Loader2, RefreshCcw, Trash2, AlertTriangle, CheckCircle2, Plus, FolderOpen, XCircle, Clock } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import Cookies from 'js-cookie'
 
@@ -204,10 +204,43 @@ export default function SettingsPage() {
     }
 
     const [syncResult, setSyncResult] = useState<string | null>(null)
+    const [syncStatus, setSyncStatus] = useState<{
+        status: string
+        files_found?: number
+        files_processed?: number
+        log_message?: string
+        error_message?: string
+        started_at?: string
+        completed_at?: string
+    } | null>(null)
+    const [syncRequestId, setSyncRequestId] = useState<string | null>(null)
+    const [isPolling, setIsPolling] = useState(false)
+
+    // Poll sync status
+    useEffect(() => {
+        if (!syncRequestId || !isPolling) return
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/admin/system/sync-status?id=${syncRequestId}`, {
+                    headers: getAuthHeaders(),
+                    credentials: 'include'
+                })
+                if (!res.ok) return
+                const data = await res.json()
+                setSyncStatus(data)
+                if (data.status === 'done' || data.status === 'error') {
+                    setIsPolling(false)
+                    setIsSyncing(false)
+                }
+            } catch { /* ignore */ }
+        }, 2000)
+        return () => clearInterval(interval)
+    }, [syncRequestId, isPolling])
 
     const handleSync = async () => {
         setIsSyncing(true)
         setSyncResult(null)
+        setSyncStatus(null)
         try {
             const res = await fetch('/api/admin/system/trigger-sync', {
                 method: 'POST',
@@ -217,19 +250,23 @@ export default function SettingsPage() {
             })
             const data = await res.json()
             if (data.success) {
-                const msg = data.pending
-                    ? '이미 동기화 요청이 대기 중입니다.'
-                    : '동기화 요청이 등록되었습니다. 로컬 모니터가 실행 중이면 30초 내 시작됩니다.'
-                setSyncResult(msg)
-                toast({ title: "✅ 동기화 요청 완료", description: msg })
+                if (data.pending) {
+                    setSyncResult('이미 동기화 요청이 대기 중입니다.')
+                    setIsSyncing(false)
+                } else {
+                    setSyncResult(null)
+                    setSyncRequestId(data.requestId)
+                    setSyncStatus({ status: 'pending', log_message: '대기 중... 로컬 모니터 응답을 기다리는 중' })
+                    setIsPolling(true)
+                }
             } else {
                 throw new Error(data.error)
             }
         } catch (err: any) {
             setSyncResult(null)
-            toast({ title: "동기화 실패", description: err.message, variant: "destructive" })
-        } finally {
+            setSyncStatus(null)
             setIsSyncing(false)
+            toast({ title: "동기화 실패", description: err.message, variant: "destructive" })
         }
     }
 
@@ -301,7 +338,7 @@ export default function SettingsPage() {
                     <CardContent>
                         <p className="text-xs text-muted-foreground mb-4">현재 선택된 센터({activeCenter})의 폴더를 스캔하여 새로운 자료를 동기화합니다.</p>
                         <Button size="sm" onClick={handleSync} disabled={isSyncing} className="w-full">
-                            {isSyncing ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> 요청 중...</> : "수동 동기화 실행"}
+                            {isSyncing ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> 진행 중...</> : "수동 동기화 실행"}
                         </Button>
                         {syncResult && (
                             <div className="mt-3 p-2.5 bg-green-50 border border-green-200 rounded-lg">
@@ -309,6 +346,53 @@ export default function SettingsPage() {
                                     <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
                                     {syncResult}
                                 </p>
+                            </div>
+                        )}
+                        {syncStatus && (
+                            <div className={`mt-3 p-3 rounded-lg border ${
+                                syncStatus.status === 'done' ? 'bg-green-50 border-green-200' :
+                                syncStatus.status === 'error' ? 'bg-red-50 border-red-200' :
+                                'bg-blue-50 border-blue-200'
+                            }`}>
+                                {/* Status header */}
+                                <div className="flex items-center gap-2 mb-1.5">
+                                    {syncStatus.status === 'pending' && <Clock className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
+                                    {syncStatus.status === 'running' && <Loader2 className="h-3.5 w-3.5 text-blue-600 animate-spin shrink-0" />}
+                                    {syncStatus.status === 'done' && <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />}
+                                    {syncStatus.status === 'error' && <XCircle className="h-3.5 w-3.5 text-red-600 shrink-0" />}
+                                    <span className={`text-xs font-medium ${
+                                        syncStatus.status === 'done' ? 'text-green-700' :
+                                        syncStatus.status === 'error' ? 'text-red-700' :
+                                        'text-blue-700'
+                                    }`}>
+                                        {syncStatus.status === 'pending' && '대기 중'}
+                                        {syncStatus.status === 'running' && '동기화 진행 중'}
+                                        {syncStatus.status === 'done' && '동기화 완료'}
+                                        {syncStatus.status === 'error' && '오류 발생'}
+                                    </span>
+                                </div>
+                                {/* Progress bar */}
+                                {syncStatus.status === 'running' && syncStatus.files_found && syncStatus.files_found > 0 && (
+                                    <div className="w-full bg-blue-100 rounded-full h-2 mb-1.5">
+                                        <div
+                                            className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+                                            style={{ width: `${Math.round(((syncStatus.files_processed || 0) / syncStatus.files_found) * 100)}%` }}
+                                        />
+                                    </div>
+                                )}
+                                {/* Log message */}
+                                {syncStatus.log_message && (
+                                    <p className={`text-xs ${
+                                        syncStatus.status === 'done' ? 'text-green-600' :
+                                        syncStatus.status === 'error' ? 'text-red-600' :
+                                        'text-blue-600'
+                                    }`}>
+                                        {syncStatus.log_message}
+                                    </p>
+                                )}
+                                {syncStatus.error_message && (
+                                    <p className="text-xs text-red-600 mt-1">{syncStatus.error_message}</p>
+                                )}
                             </div>
                         )}
                     </CardContent>
