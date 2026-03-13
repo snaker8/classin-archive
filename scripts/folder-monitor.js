@@ -1279,6 +1279,19 @@ async function main() {
     pollForSyncRequests(watchDirs, centerMapping);
     // Recurring poll every 30 seconds
     setInterval(() => pollForSyncRequests(watchDirs, centerMapping), 30 * 1000);
+
+    // ── Heartbeat (every 30 seconds) ──
+    async function sendHeartbeat() {
+        try {
+            await supabase.from('system_config').upsert({
+                key: 'monitor_heartbeat',
+                value: JSON.stringify({ alive: true, timestamp: new Date().toISOString(), dirs: watchDirs.length }),
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'key' });
+        } catch (e) { /* non-critical */ }
+    }
+    sendHeartbeat();
+    setInterval(sendHeartbeat, 30 * 1000);
     // ────────────────────────────────────────────────────
 }
 

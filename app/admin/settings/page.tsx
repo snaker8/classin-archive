@@ -24,6 +24,10 @@ export default function SettingsPage() {
     const [isSyncing, setIsSyncing] = useState(false)
     const [isDeleting, setIsDeleting] = useState(false)
 
+    // Monitor heartbeat
+    const [monitorAlive, setMonitorAlive] = useState<boolean | null>(null)
+    const [monitorLastSeen, setMonitorLastSeen] = useState<string | null>(null)
+
     // Monitor config states
     const [configLoading, setConfigLoading] = useState(true)
     const [monitorConfig, setMonitorConfig] = useState<{ watchDirs: { center: string, path: string }[], autoUploadImages: boolean, autoUploadVideos: boolean }>({ watchDirs: [], autoUploadImages: false, autoUploadVideos: true })
@@ -90,6 +94,31 @@ export default function SettingsPage() {
     }, [])
 
     const [configSaved, setConfigSaved] = useState(false)
+
+    // Check monitor heartbeat
+    useEffect(() => {
+        const checkHeartbeat = async () => {
+            try {
+                const { data } = await supabase
+                    .from('system_config')
+                    .select('value, updated_at')
+                    .eq('key', 'monitor_heartbeat')
+                    .single()
+                if (data) {
+                    const hb = JSON.parse(data.value)
+                    const lastTime = new Date(hb.timestamp).getTime()
+                    const isAlive = (Date.now() - lastTime) < 90 * 1000  // 90초 이내면 활성
+                    setMonitorAlive(isAlive)
+                    setMonitorLastSeen(hb.timestamp)
+                } else {
+                    setMonitorAlive(false)
+                }
+            } catch { setMonitorAlive(false) }
+        }
+        checkHeartbeat()
+        const interval = setInterval(checkHeartbeat, 15000)
+        return () => clearInterval(interval)
+    }, [])
 
     const getAuthHeaders = (): Record<string, string> => {
         const token = Cookies.get('sb-access-token')
@@ -312,18 +341,41 @@ export default function SettingsPage() {
 
             {/* System Status and Tools */}
             <div className="grid gap-6 md:grid-cols-2">
-                <Card className="shadow-sm border-green-500/10">
+                <Card className={`shadow-sm ${monitorAlive ? 'border-green-500/10' : 'border-red-500/20'}`}>
                     <CardHeader>
                         <CardTitle className="text-sm font-medium">시스템 상태</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <div className="flex items-center gap-2 text-green-500">
-                            <CheckCircle2 className="h-5 w-5" />
-                            <span className="font-medium text-sm">업로드 모니터링 엔진 정상</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground bg-muted p-3 rounded-lg">
-                            <p>감시 경로: 아래 등록된 폴더 경로</p>
-                            <p className="mt-1">실시간 동기화: 활성화됨</p>
+                        {monitorAlive === null ? (
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                                <span className="font-medium text-sm">상태 확인 중...</span>
+                            </div>
+                        ) : monitorAlive ? (
+                            <div className="flex items-center gap-2 text-green-500">
+                                <CheckCircle2 className="h-5 w-5" />
+                                <span className="font-medium text-sm">폴더 모니터 실행 중</span>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-2 text-red-500">
+                                <XCircle className="h-5 w-5" />
+                                <span className="font-medium text-sm">폴더 모니터 미실행</span>
+                            </div>
+                        )}
+                        <div className={`text-xs p-3 rounded-lg ${monitorAlive ? 'text-muted-foreground bg-muted' : 'text-red-600 bg-red-50'}`}>
+                            {monitorAlive ? (
+                                <>
+                                    <p>감시 경로: 아래 등록된 폴더 경로</p>
+                                    <p className="mt-1">실시간 동기화: 활성화됨</p>
+                                    {monitorLastSeen && <p className="mt-1">마지막 응답: {new Date(monitorLastSeen).toLocaleString('ko-KR')}</p>}
+                                </>
+                            ) : (
+                                <>
+                                    <p>로컬 PC에서 폴더 모니터가 실행되지 않고 있습니다.</p>
+                                    <p className="mt-1">ClassIn-Start.bat을 실행하거나 관리자에게 문의하세요.</p>
+                                    {monitorLastSeen && <p className="mt-1">마지막 응답: {new Date(monitorLastSeen).toLocaleString('ko-KR')}</p>}
+                                </>
+                            )}
                         </div>
                     </CardContent>
                 </Card>
