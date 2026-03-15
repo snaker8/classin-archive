@@ -257,9 +257,14 @@ export default function SettingsPage() {
                 if (!res.ok) return
                 const data = await res.json()
                 setSyncStatus(data)
-                if (data.status === 'done' || data.status === 'error') {
+                if (data.status === 'done') {
                     setIsPolling(false)
                     setIsSyncing(false)
+                    toast({ title: "동기화 완료", description: data.log_message || "동기화가 성공적으로 완료되었습니다." })
+                } else if (data.status === 'error') {
+                    setIsPolling(false)
+                    setIsSyncing(false)
+                    toast({ title: "동기화 오류", description: data.error_message || "동기화 중 오류가 발생했습니다.", variant: "destructive" })
                 }
             } catch { /* ignore */ }
         }, 2000)
@@ -282,11 +287,13 @@ export default function SettingsPage() {
                 if (data.pending && !data.requestId) {
                     setSyncResult('이미 동기화 요청이 대기 중입니다.')
                     setIsSyncing(false)
+                    toast({ title: "동기화 요청", description: "이미 대기 중인 요청이 있습니다." })
                 } else {
                     setSyncResult(null)
                     setSyncRequestId(data.requestId)
                     setSyncStatus({ status: 'pending', log_message: '대기 중... 로컬 모니터 응답을 기다리는 중' })
                     setIsPolling(true)
+                    toast({ title: "동기화 요청 전송됨", description: "로컬 모니터가 응답하면 진행 상황이 아래에 표시됩니다." })
                 }
             } else {
                 throw new Error(data.error)
