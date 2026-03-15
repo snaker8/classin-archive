@@ -291,14 +291,18 @@ export default function SettingsPage() {
                 } else {
                     setSyncResult(null)
                     setSyncRequestId(data.requestId)
-                    setSyncStatus({ status: 'pending', log_message: data.monitorStarted ? '폴더 모니터 시작 중... 잠시 기다려주세요' : '대기 중... 로컬 모니터 응답을 기다리는 중' })
+                    if (data.monitorAlive === false) {
+                        setSyncStatus({ status: 'pending', log_message: '⚠️ 폴더 모니터가 꺼져 있습니다. 로컬 PC에서 ClassIn-Start.bat을 실행해주세요.' })
+                        toast({
+                            title: "⚠️ 폴더 모니터 미실행",
+                            description: "요청은 등록되었지만, 모니터가 꺼져 있어 동기화가 진행되지 않습니다. ClassIn-Start.bat을 실행해주세요.",
+                            variant: "destructive"
+                        })
+                    } else {
+                        setSyncStatus({ status: 'pending', log_message: '대기 중... 로컬 모니터 응답을 기다리는 중' })
+                        toast({ title: "동기화 요청 전송됨", description: "로컬 모니터가 응답하면 진행 상황이 아래에 표시됩니다." })
+                    }
                     setIsPolling(true)
-                    toast({
-                        title: data.monitorStarted ? "폴더 모니터 자동 시작됨" : "동기화 요청 전송됨",
-                        description: data.monitorStarted
-                            ? "모니터가 꺼져 있어 자동 시작했습니다. 잠시 후 동기화가 시작됩니다."
-                            : "로컬 모니터가 응답하면 진행 상황이 아래에 표시됩니다."
-                    })
                 }
             } else {
                 throw new Error(data.error)
