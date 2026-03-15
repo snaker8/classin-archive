@@ -7,6 +7,7 @@ import { LayoutDashboard, LogOut, Settings, Users, User, Menu, X, GraduationCap,
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import Cookies from 'js-cookie'
+import { Toaster } from '@/components/ui/toaster'
 
 const sidebarItems = [
   { icon: LayoutDashboard, label: '대시보드', path: '/admin/dashboard' },
@@ -50,14 +51,31 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return () => subscription.unsubscribe()
   }, [router])
 
-  // Active Center tracking
+  // Active Center tracking - enforce user's center if cookie not set
   useEffect(() => {
-    const loadCenter = () => {
+    const loadCenter = async () => {
       const center = Cookies.get('active_center')
       if (center) {
         setActiveCenter(center)
       } else {
-        setActiveCenter('전체')
+        // Cookie not set - check user's profile center and enforce it
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role, center')
+            .eq('id', session.user.id)
+            .single()
+
+          if (profile?.center && profile.center !== '전체' && profile.role !== 'super_manager') {
+            Cookies.set('active_center', profile.center, { expires: 7, path: '/' })
+            setActiveCenter(profile.center)
+          } else {
+            setActiveCenter('전체')
+          }
+        } else {
+          setActiveCenter('전체')
+        }
       }
     }
 
@@ -259,6 +277,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           {children}
         </div>
       </main>
+      <Toaster />
     </div>
   )
 }
