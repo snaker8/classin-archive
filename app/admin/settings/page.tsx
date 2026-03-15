@@ -291,9 +291,14 @@ export default function SettingsPage() {
                 } else {
                     setSyncResult(null)
                     setSyncRequestId(data.requestId)
-                    setSyncStatus({ status: 'pending', log_message: '대기 중... 로컬 모니터 응답을 기다리는 중' })
+                    setSyncStatus({ status: 'pending', log_message: data.monitorStarted ? '폴더 모니터 시작 중... 잠시 기다려주세요' : '대기 중... 로컬 모니터 응답을 기다리는 중' })
                     setIsPolling(true)
-                    toast({ title: "동기화 요청 전송됨", description: "로컬 모니터가 응답하면 진행 상황이 아래에 표시됩니다." })
+                    toast({
+                        title: data.monitorStarted ? "폴더 모니터 자동 시작됨" : "동기화 요청 전송됨",
+                        description: data.monitorStarted
+                            ? "모니터가 꺼져 있어 자동 시작했습니다. 잠시 후 동기화가 시작됩니다."
+                            : "로컬 모니터가 응답하면 진행 상황이 아래에 표시됩니다."
+                    })
                 }
             } else {
                 throw new Error(data.error)
