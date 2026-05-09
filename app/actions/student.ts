@@ -52,10 +52,13 @@ export async function createStudent(prevState: any, formData: FormData) {
             ...(parentPhone ? { parent_phone: parentPhone.replace(/[-\s]/g, '') } : {})
         }
 
-        if (requesterProfile.role !== 'super_manager' && !(requesterProfile.role === 'admin' && requesterProfile.center === '전체')) {
+        // 센터 배정: super_manager/전체 admin은 activeCenter 사용, 나머지(teacher 포함)는 본인 센터
+        if (requesterProfile.role === 'super_manager' || (requesterProfile.role === 'admin' && requesterProfile.center === '전체')) {
+            if (activeCenter && activeCenter !== '전체') {
+                profileData.center = activeCenter
+            }
+        } else if (requesterProfile.center) {
             profileData.center = requesterProfile.center
-        } else if (activeCenter && activeCenter !== '전체') {
-            profileData.center = activeCenter
         }
 
         const { error: profileError } = await supabaseAdmin
@@ -208,7 +211,9 @@ export async function deleteStudents(studentIds: string[]) {
     }
 }
 
-export async function getStudents() {
+type StudentStatusFilter = 'active' | 'withdrawn' | 'all'
+
+export async function getStudents(statusFilter: StudentStatusFilter = 'active') {
     try {
         const cookieStore = cookies()
         const activeCenter = cookieStore.get('active_center')?.value
@@ -227,7 +232,10 @@ export async function getStudents() {
                 )
             `)
             .eq('role', 'student')
-            .eq('status', 'active')
+
+        if (statusFilter !== 'all') {
+            query = query.eq('status', statusFilter)
+        }
 
         // If not super_manager/전체-admin, force filter by their center
         if (requesterProfile.role !== 'super_manager' && !(requesterProfile.role === 'admin' && requesterProfile.center === '전체')) {
@@ -243,6 +251,65 @@ export async function getStudents() {
     } catch (error) {
         console.error('Error fetching students:', error)
         return { students: [] }
+    }
+}
+
+export async function withdrawStudent(studentId: string) {
+    try {
+        // 권한 체크: 해당 학생이 속한 센터에 접근 권한 있는지
+        const { data: student, error: fetchErr } = await supabaseAdmin
+            .from('profiles')
+            .select('center, status')
+            .eq('id', studentId)
+            .single()
+
+        if (fetchErr) throw fetchErr
+        if (!student) throw new Error('학생을 찾을 수 없습니다.')
+
+        await requireCenterAccess(student.center)
+
+        const { error } = await supabaseAdmin
+            .from('profiles')
+            .update({ status: 'withdrawn', updated_at: new Date().toISOString() })
+            .eq('id', studentId)
+
+        if (error) throw error
+
+        revalidatePath('/teacher/students')
+        revalidatePath('/admin/students')
+        return { success: true }
+    } catch (error: any) {
+        console.error('Withdraw student error:', error)
+        return { error: error.message || '퇴원 처리 중 오류가 발생했습니다.' }
+    }
+}
+
+export async function restoreStudent(studentId: string) {
+    try {
+        const { data: student, error: fetchErr } = await supabaseAdmin
+            .from('profiles')
+            .select('center, status')
+            .eq('id', studentId)
+            .single()
+
+        if (fetchErr) throw fetchErr
+        if (!student) throw new Error('학생을 찾을 수 없습니다.')
+
+        await requireCenterAccess(student.center)
+
+        const { error } = await supabaseAdmin
+            .from('profiles')
+            .update({ status: 'active', updated_at: new Date().toISOString() })
+            .eq('id', studentId)
+
+        if (error) throw error
+
+        revalidatePath('/teacher/students')
+        revalidatePath('/admin/students')
+        return { success: true }
+    } catch (error: any) {
+        console.error('Restore student error:', error)
+        return { error: error.message || '복원 중 오류가 발생했습니다.' }
     }
 }
 
@@ -274,7 +341,7 @@ export async function getStudentDetails(studentId: string) {
 
         if (classesError) throw classesError
 
-        // 3. Fetch Enrolled Groups
+        // 3. Fetch Currently Enrolled Groups (active membership)
         const { data: groupMembers, error: groupsError } = await supabaseAdmin
             .from('group_members')
             .select(`
@@ -284,14 +351,33 @@ export async function getStudentDetails(studentId: string) {
 
         if (groupsError) throw groupsError
 
-        const enrolledGroups = groupMembers?.map((gm: any) => gm.group) || []
-        // Natural sort enrolled groups
-        enrolledGroups.sort((a: any, b: any) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+        const enrolledGroups = groupMembers?.map((gm: any) => gm.group).filter(Boolean) || []
+
+        // 4. Fetch Past Groups from class history (groups student had classes in but is no longer a member of)
+        const classGroupIds = [...new Set((classes || []).map((c: any) => c.group_id).filter(Boolean))]
+        const enrolledGroupIds = new Set(enrolledGroups.map((g: any) => g.id))
+        const pastGroupIds = classGroupIds.filter(id => !enrolledGroupIds.has(id))
+
+        let pastGroups: any[] = []
+        if (pastGroupIds.length > 0) {
+            const { data: pastGroupData } = await supabaseAdmin
+                .from('groups')
+                .select('*')
+                .in('id', pastGroupIds)
+            pastGroups = pastGroupData || []
+        }
+
+        // Combine and sort: active groups first, then past groups
+        const allGroups = [
+            ...enrolledGroups.map((g: any) => ({ ...g, membership: 'active' as const })),
+            ...pastGroups.map((g: any) => ({ ...g, membership: 'past' as const })),
+        ]
+        allGroups.sort((a: any, b: any) => a.name.localeCompare(b.name, undefined, { numeric: true }))
 
         return {
             student: profile,
             classes: classes || [],
-            enrolledGroups
+            enrolledGroups: allGroups
         }
     } catch (error: any) {
         console.error('Error fetching student details:', error)
